@@ -1,0 +1,18 @@
+import { Message } from "./types";
+
+export function isMessage(msg: any): msg is Message {
+  if (typeof msg !== "object" || msg === null) return false;
+
+  if (typeof msg.clientName !== "string") return false;
+
+  switch (msg.type) {
+    case "sum":
+      return typeof msg.a === "number" && typeof msg.b === "number";
+
+    case "log":
+      return typeof msg.message === "string";
+
+    default:
+      return false;
+  }
+}
