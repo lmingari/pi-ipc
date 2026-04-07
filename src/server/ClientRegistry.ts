@@ -19,6 +19,10 @@ export class ClientRegistry {
     return this.nameToId.get(name);
   }
 
+  getAllIds(): string[] {
+    return Array.from(this.idToName.keys());
+  }
+
   getName(clientId: string): string | undefined {
     return this.idToName.get(clientId);
   }

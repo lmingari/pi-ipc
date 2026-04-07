@@ -38,15 +38,19 @@ export class Server {
     this.handlers.set(type, handler);
   }
 
-  async sendTo(name: string, msg: unknown) {
+  async send(name: string, msg: unknown) {
     const id = this.registry.getId(name);
     if (!id) return;
-
-    await this.transport.sendTo(id, msg);
+  
+    await this.transport.write(msg, id);
   }
 
   async broadcast(msg: unknown) {
-    await this.transport.broadcast(msg);
+    const ids = this.registry.getAllIds();
+  
+    await Promise.all(
+      ids.map((id) => this.transport.write(msg, id))
+    );
   }
 
   async stop() {

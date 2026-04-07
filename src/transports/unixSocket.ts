@@ -73,71 +73,41 @@ export class UnixSocketTransport implements Transport {
     });
   }
 
-  // ✅ CLIENT → SERVER
-  async send(data: unknown): Promise<void> {
-    if (this.mode !== "client") {
-      throw new Error("send() can only be used in client mode");
-    }
-
+  async write(data: unknown, clientId?: string): Promise<void> {
     const payload = JSON.stringify(data) + "\n";
-
-    await new Promise<void>((resolve, reject) => {
-      const ok = this.socket!.write(payload, (err) => {
-        if (err) reject(err);
-        else resolve();
+  
+    // CLIENT MODE
+    if (this.mode === "client") {
+      if (!this.socket) throw new Error("Not connected");
+  
+      await new Promise<void>((resolve, reject) => {
+        const ok = this.socket!.write(payload, (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+  
+        if (!ok) this.socket!.once("drain", resolve);
       });
-
-      if (!ok) {
-        this.socket!.once("drain", resolve);
-      }
-    });
-  }
-
-  // ✅ SERVER → ONE CLIENT
-  async sendTo(clientId: string, data: unknown): Promise<void> {
-    if (this.mode !== "server") {
-      throw new Error("sendTo() can only be used in server mode");
+  
+      return;
     }
-
+  
+    // SERVER MODE
+    if (!clientId) {
+      throw new Error("clientId required in server mode");
+    }
+  
     const socket = this.sockets.get(clientId);
     if (!socket) return;
-
-    const payload = JSON.stringify(data) + "\n";
-
+  
     await new Promise<void>((resolve, reject) => {
       const ok = socket.write(payload, (err) => {
         if (err) reject(err);
         else resolve();
       });
-
-      if (!ok) {
-        socket.once("drain", resolve);
-      }
+  
+      if (!ok) socket.once("drain", resolve);
     });
-  }
-
-  // ✅ SERVER → ALL CLIENTS
-  async broadcast(data: unknown): Promise<void> {
-    if (this.mode !== "server") {
-      throw new Error("broadcast() can only be used in server mode");
-    }
-
-    const payload = JSON.stringify(data) + "\n";
-
-    const writes = Array.from(this.sockets.values()).map((socket) => {
-      return new Promise<void>((resolve, reject) => {
-        const ok = socket.write(payload, (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-
-        if (!ok) {
-          socket.once("drain", resolve);
-        }
-      });
-    });
-
-    await Promise.all(writes);
   }
 
   onMessage(cb: (data: unknown, clientId?: string) => void): void {

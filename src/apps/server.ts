@@ -10,7 +10,7 @@ async function main() {
 
     const result = msg.a + msg.b;
 
-    await server.sendTo(clientName, {
+    await server.send(clientName, {
       type: "log",
       message: `Result: ${result}`,
       clientName: "server",
