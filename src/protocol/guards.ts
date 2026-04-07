@@ -3,14 +3,22 @@ import { Message } from "./types";
 export function isMessage(msg: any): msg is Message {
   if (typeof msg !== "object" || msg === null) return false;
 
-  if (typeof msg.clientName !== "string") return false;
-
   switch (msg.type) {
+    case "register":
+      return typeof msg.clientName === "string";
+
     case "sum":
-      return typeof msg.a === "number" && typeof msg.b === "number";
+      return (
+        typeof msg.clientName === "string" &&
+        typeof msg.a === "number" &&
+        typeof msg.b === "number"
+      );
 
     case "log":
-      return typeof msg.message === "string";
+      return (
+        typeof msg.clientName === "string" &&
+        typeof msg.message === "string"
+      );
 
     default:
       return false;

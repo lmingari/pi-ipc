@@ -1,29 +1,20 @@
-import { createTransport } from "../core/createTransport";
-import { isMessage } from "../protocol/guards";
+import { Server } from "../server/Server";
 
 async function main() {
-  const transport = createTransport("server");
+  const server = new Server();
 
-  await transport.connect();
-  console.log("Server ready");
+  await server.start();
 
-  transport.onMessage((raw) => {
-    if (!isMessage(raw)) {
-      console.log("Invalid message:", raw);
-      return;
-    }
+  server.on("sum", async (msg, clientName) => {
+    console.log(`sum from ${clientName}`);
 
-    console.log(`received message from ${raw.clientName}`);
+    const result = msg.a + msg.b;
 
-    switch (raw.type) {
-      case "sum":
-        console.log("Result:", raw.a + raw.b);
-        break;
-
-      case "log":
-        console.log("Log:", raw.message);
-        break;
-    }
+    await server.sendTo(clientName, {
+      type: "log",
+      message: `Result: ${result}`,
+      clientName: "server",
+    });
   });
 }
 

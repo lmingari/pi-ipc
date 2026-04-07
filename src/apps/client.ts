@@ -1,29 +1,26 @@
-import { createTransport } from "../core/createTransport";
-import { Message } from "../protocol/types";
+import { Client } from "../client/Client";
 
 async function main() {
-  const clientName = process.argv[2];
-
-  if (!clientName) {
-    console.error("Usage: client.ts <clientName>");
+  const name = process.argv[2];
+  if (!name) {
+    console.error("Usage: client <name>");
     process.exit(1);
   }
 
-  const transport = createTransport("client");
+  const client = new Client(name);
 
-  await transport.connect();
+  await client.connect();
 
-//  const msg: Message = {
-//    type: "suma",
-//    a: 20,
-//    b: 25,
-//    clientName,
-//  };
-  const msg: Message = {type: "log", message: "Hola!", clientName };
+  client.onMessage((msg) => {
+    console.log("received:", msg);
+  });
 
-  await transport.send(msg);
-
-  await transport.close();
+  await client.send({
+    type: "sum",
+    a: 10,
+    b: 20,
+    clientName: name,
+  });
 }
 
 main();

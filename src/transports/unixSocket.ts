@@ -3,12 +3,14 @@ import fs from "fs";
 import { Transport } from "../core/transport";
 
 export class UnixSocketTransport implements Transport {
-  private socket?: net.Socket;              // client mode
-  private server?: net.Server;              // server mode
-  private sockets = new Set<net.Socket>();  // server: all clients
+  private socket?: net.Socket; // client
+  private server?: net.Server;
 
-  private messageHandler?: (data: unknown) => void;
-  private disconnectHandler?: () => void;
+  private sockets = new Map<string, net.Socket>();
+  private nextClientId = 1;
+
+  private messageHandler?: (data: unknown, clientId?: string) => void;
+  private disconnectHandler?: (clientId?: string) => void;
 
   constructor(
     private path: string,
@@ -17,30 +19,26 @@ export class UnixSocketTransport implements Transport {
 
   async connect(): Promise<void> {
     if (this.mode === "server") {
-      // Clean previous socket file
-      if (fs.existsSync(this.path)) {
-        fs.unlinkSync(this.path);
-      }
+      if (fs.existsSync(this.path)) fs.unlinkSync(this.path);
 
       this.server = net.createServer((socket) => {
-        this.sockets.add(socket);
+        const clientId = String(this.nextClientId++);
+        this.sockets.set(clientId, socket);
 
-        this.attachSocket(socket);
+        this.attachSocket(socket, clientId);
 
         socket.on("close", () => {
-          this.sockets.delete(socket);
-          this.disconnectHandler?.();
+          this.sockets.delete(clientId);
+          this.disconnectHandler?.(clientId);
         });
       });
 
       return new Promise((resolve) => {
-        this.server!.listen(this.path, () => {
-          resolve();
-        });
+        this.server!.listen(this.path, resolve);
       });
     }
 
-    // CLIENT MODE
+    // client mode
     return new Promise((resolve, reject) => {
       const socket = net.createConnection(this.path);
 
@@ -54,7 +52,7 @@ export class UnixSocketTransport implements Transport {
     });
   }
 
-  private attachSocket(socket: net.Socket) {
+  private attachSocket(socket: net.Socket, clientId?: string) {
     let buffer = "";
 
     socket.on("data", (data) => {
@@ -67,7 +65,7 @@ export class UnixSocketTransport implements Transport {
 
         try {
           const parsed = JSON.parse(raw);
-          this.messageHandler?.(parsed);
+          this.messageHandler?.(parsed, clientId);
         } catch {
           console.error("Invalid JSON:", raw);
         }
@@ -75,27 +73,58 @@ export class UnixSocketTransport implements Transport {
     });
   }
 
+  // ✅ CLIENT → SERVER
   async send(data: unknown): Promise<void> {
-    const payload = JSON.stringify(data) + "\n";
-
-    // CLIENT → single socket
-    if (this.socket) {
-      await new Promise<void>((resolve, reject) => {
-        const ok = this.socket!.write(payload, (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-
-        if (!ok) {
-          this.socket!.once("drain", resolve);
-        }
-      });
-
-      return;
+    if (this.mode !== "client") {
+      throw new Error("send() can only be used in client mode");
     }
 
-    // SERVER → broadcast to all clients
-    const writes = Array.from(this.sockets).map((socket) => {
+    const payload = JSON.stringify(data) + "\n";
+
+    await new Promise<void>((resolve, reject) => {
+      const ok = this.socket!.write(payload, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+
+      if (!ok) {
+        this.socket!.once("drain", resolve);
+      }
+    });
+  }
+
+  // ✅ SERVER → ONE CLIENT
+  async sendTo(clientId: string, data: unknown): Promise<void> {
+    if (this.mode !== "server") {
+      throw new Error("sendTo() can only be used in server mode");
+    }
+
+    const socket = this.sockets.get(clientId);
+    if (!socket) return;
+
+    const payload = JSON.stringify(data) + "\n";
+
+    await new Promise<void>((resolve, reject) => {
+      const ok = socket.write(payload, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+
+      if (!ok) {
+        socket.once("drain", resolve);
+      }
+    });
+  }
+
+  // ✅ SERVER → ALL CLIENTS
+  async broadcast(data: unknown): Promise<void> {
+    if (this.mode !== "server") {
+      throw new Error("broadcast() can only be used in server mode");
+    }
+
+    const payload = JSON.stringify(data) + "\n";
+
+    const writes = Array.from(this.sockets.values()).map((socket) => {
       return new Promise<void>((resolve, reject) => {
         const ok = socket.write(payload, (err) => {
           if (err) reject(err);
@@ -111,18 +140,17 @@ export class UnixSocketTransport implements Transport {
     await Promise.all(writes);
   }
 
-  onMessage(cb: (data: unknown) => void): void {
+  onMessage(cb: (data: unknown, clientId?: string) => void): void {
     this.messageHandler = cb;
   }
 
-  onDisconnect(cb: () => void): void {
+  onDisconnect(cb: (clientId?: string) => void): void {
     this.disconnectHandler = cb;
   }
 
   async close(): Promise<void> {
     const tasks: Promise<void>[] = [];
 
-    // Close client socket
     if (this.socket) {
       tasks.push(
         new Promise((resolve) => {
@@ -132,8 +160,7 @@ export class UnixSocketTransport implements Transport {
       );
     }
 
-    // Close all server-side sockets
-    for (const socket of this.sockets) {
+    for (const socket of this.sockets.values()) {
       tasks.push(
         new Promise((resolve) => {
           socket.end();
@@ -142,7 +169,6 @@ export class UnixSocketTransport implements Transport {
       );
     }
 
-    // Close server listener
     if (this.server) {
       tasks.push(
         new Promise((resolve) => {
