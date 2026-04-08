@@ -15,11 +15,15 @@ async function main() {
     console.log("received:", msg);
   });
 
+//  await client.send({
+//    type: "log",
+//    message: "hola",
+//  });
+
   await client.send({
     type: "sum",
     a: 10,
     b: 20,
-    clientName: name,
   });
 }
 

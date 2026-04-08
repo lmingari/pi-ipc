@@ -13,7 +13,6 @@ async function main() {
     await server.send(clientName, {
       type: "log",
       message: `Result: ${result}`,
-      clientName: "server",
     });
   });
 }

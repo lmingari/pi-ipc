@@ -1,48 +1,47 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { createServer } from "../src/server/createServer";
+import { Server } from "../src/server/Server";
 
 export default function (pi: ExtensionAPI) {
-  let serverInstance: { close: () => void } | null = null;
+  let server: Server | null = null;
 
   pi.registerCommand("start-ipc-server", {
-    description: "Start IPC server and display messages in TUI",
+    description: "Start IPC server",
 
     handler: async (_args, ctx) => {
-      if (serverInstance) {
+      if (server) {
         ctx.ui.notify("Server already running", "warning");
         return;
       }
 
-      ctx.ui.notify("Starting IPC server...", "info");
+      server = new Server();
 
-      serverInstance = await createServer({
-        onMessage: (msg) => {
-          ctx.ui.notify(
-            `Message received from ${msg.clientName}: ${JSON.stringify(msg)}`,
-            "info"
-          );
+      await server.start();
 
-          switch (msg.type) {
-            case "log":
-              pi.sendUserMessage(msg.message);
-            break;
-          }
+      ctx.ui.notify("IPC server started", "success");
 
-        },
+      // 🔥 Register handlers
+      server.on("sum", async (msg, clientName) => {
+        ctx.ui.notify(
+          `sum from ${clientName}: ${msg.a} + ${msg.b}`,
+          "info"
+        );
 
-        onInvalidMessage: (msg) => {
-          ctx.ui.notify(
-            `Invalid message: ${JSON.stringify(msg)}`,
-            "error"
-          );
-        },
+        const result = msg.a + msg.b;
 
-        onDisconnect: () => {
-          ctx.ui.notify("Client disconnected", "warning");
-        },
+        await server!.send(clientName, {
+          type: "log",
+          message: `Result: ${result}`,
+          clientName: "server",
+        });
       });
 
-      ctx.ui.notify("IPC server running", "success");
+      server.on("log", async (msg, clientName) => {
+        pi.sendUserMessage(msg.message);
+        ctx.ui.notify(
+          `[${clientName}] ${msg.message}`,
+          "info"
+        );
+      });
     },
   });
 
@@ -50,15 +49,21 @@ export default function (pi: ExtensionAPI) {
     description: "Stop IPC server",
 
     handler: async (_args, ctx) => {
-      if (!serverInstance) {
+      if (!server) {
         ctx.ui.notify("Server not running", "warning");
         return;
       }
 
-      serverInstance.close();
-      serverInstance = null;
+      await server.broadcast({
+        type: "log",
+        message: "Server shutting down",
+        clientName: "server",
+      });
 
-      ctx.ui.notify("Server stopped", "info");
+      await server.stop();
+      server = null;
+
+      ctx.ui.notify("IPC server stopped", "info");
     },
   });
 }

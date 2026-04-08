@@ -9,14 +9,12 @@ export function isMessage(msg: any): msg is Message {
 
     case "sum":
       return (
-        typeof msg.clientName === "string" &&
         typeof msg.a === "number" &&
         typeof msg.b === "number"
       );
 
     case "log":
       return (
-        typeof msg.clientName === "string" &&
         typeof msg.message === "string"
       );
 
