@@ -5,6 +5,14 @@ async function main() {
 
   await server.start();
 
+  server.onConnect((name) => {
+    console.log(`Client connected: ${name}`);
+  });
+  
+  server.onDisconnect((name) => {
+    console.log(`Client disconnected: ${name}`);
+  });
+
   server.on("sum", async (msg, clientName) => {
     console.log(`sum from ${clientName}`);
 

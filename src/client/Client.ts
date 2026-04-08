@@ -3,6 +3,7 @@ import { createTransport } from "../core/createTransport";
 export class Client {
   private transport = createTransport("client");
   private connected = false;
+  private disconnectHandlers: (() => void)[] = [];
 
   constructor(private name: string) {}
 
@@ -10,6 +11,15 @@ export class Client {
     if (this.connected) return;
 
     await this.transport.connect();
+
+    this.transport.onDisconnect(() => {
+      this.connected = false;
+  
+      // notify user handlers
+      for (const h of this.disconnectHandlers) {
+        h();
+      }
+    });
 
     // 🔥 Register immediately after connection
     await this.transport.write({
@@ -35,10 +45,7 @@ export class Client {
   }
 
   onDisconnect(handler: () => void) {
-    this.transport.onDisconnect(() => {
-      this.connected = false;
-      handler();
-    });
+    this.disconnectHandlers.push(handler);
   }
 
   async close() {
@@ -46,5 +53,9 @@ export class Client {
 
     await this.transport.close();
     this.connected = false;
+  }
+
+  isConnected() {
+    return this.connected;
   }
 }

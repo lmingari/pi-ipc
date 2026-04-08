@@ -8,6 +8,8 @@ export class Server {
   private transport = createTransport("server");
   private registry = new ClientRegistry();
   private handlers = new Map<string, Handler>();
+  private onConnectHandlers: ((name: string) => void)[] = [];
+  private onDisconnectHandlers: ((name: string) => void)[] = [];
 
   async start() {
     await this.transport.connect();
@@ -15,8 +17,14 @@ export class Server {
     this.transport.onMessage(async (raw, clientId) => {
       if (!clientId || !isMessage(raw)) return;
 
+      // New client connection
       if (raw.type === "register") {
         this.registry.register(clientId, raw.clientName);
+
+        for (const handler of this.onConnectHandlers) {
+          handler(raw.clientName);
+        }
+
         return;
       }
 
@@ -28,10 +36,28 @@ export class Server {
       }
     });
 
+    // Client disconnects
     this.transport.onDisconnect((clientId) => {
       if (!clientId) return;
+    
+      const name = this.registry.getName(clientId);
+    
       this.registry.unregister(clientId);
+    
+      if (name) {
+        for (const handler of this.onDisconnectHandlers) {
+          handler(name);
+        }
+      }
     });
+  }
+
+  onConnect(handler: (name: string) => void) {
+    this.onConnectHandlers.push(handler);
+  }
+  
+  onDisconnect(handler: (name: string) => void) {
+    this.onDisconnectHandlers.push(handler);
   }
 
   on(type: string, handler: Handler) {
