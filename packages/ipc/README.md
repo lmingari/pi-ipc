@@ -27,7 +27,7 @@ server.on("sum", async (msg, clientName) => {
 const client = new Client("alice");
 await client.connect();
 
-client.onMessage((msg) => console.log("message", msg));
+client.on("log", (msg) => console.log("message", msg));
 client.onDisconnect(() => console.log("server down"));
 
 await client.send({ type: "sum", a: 1, b: 2 });
@@ -47,6 +47,6 @@ await client.send({ type: "sum", a: 1, b: 2 });
 ### Client
 - `connect(): Promise<void>`
 - `send(msg: unknown): Promise<void>`
-- `onMessage(handler: (msg: unknown) => void): void`
+- `on(type: string, handler: (msg: any) => Promise<void> | void): void`
 - `onDisconnect(handler: () => void): void`
 - `close(): Promise<void>`

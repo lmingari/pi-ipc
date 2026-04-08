@@ -1,11 +1,8 @@
 import { createTransport } from "../core/createTransport.js";
+import { isMessage } from "../protocol/guards.js";
+import type { Message } from "../protocol/types.js";
 
-type Handler = (msg: any) => Promise<void> | void;
-
-type Message = {
-  type: string;
-  [key: string]: unknown;
-};
+type Handler = (msg: Message) => Promise<void> | void;
 
 export class Client {
   private transport = createTransport("client");
@@ -30,13 +27,11 @@ export class Client {
     });
 
     this.transport.onMessage(async (msg) => {
-      if (!msg || typeof msg !== "object") return;
-      const message = msg as Message;
-      if (typeof message.type !== "string") return;
+      if (!isMessage(msg)) return;
 
-      const handler = this.handlers.get(message.type);
+      const handler = this.handlers.get(msg.type);
       if (handler) {
-        await handler(message);
+        await handler(msg);
       }
     });
 
@@ -57,7 +52,7 @@ export class Client {
     await this.transport.write(msg);
   }
 
-  on(type: string, handler: Handler) {
+  on(type: Message["type"], handler: Handler) {
     this.handlers.set(type, handler);
   }
 

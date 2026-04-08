@@ -11,7 +11,7 @@ async function main() {
 
   await client.connect();
 
-  client.onMessage((msg) => {
+  client.on("log", (msg) => {
     console.log("received:", msg);
   });
 
