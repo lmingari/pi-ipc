@@ -1,9 +1,17 @@
 import { createTransport } from "../core/createTransport.js";
 
+type Handler = (msg: any) => Promise<void> | void;
+
+type Message = {
+  type: string;
+  [key: string]: unknown;
+};
+
 export class Client {
   private transport = createTransport("client");
   private connected = false;
   private disconnectHandlers: (() => void)[] = [];
+  private handlers = new Map<string, Handler>();
 
   constructor(private name: string) {}
 
@@ -18,6 +26,17 @@ export class Client {
       // notify user handlers
       for (const h of this.disconnectHandlers) {
         h();
+      }
+    });
+
+    this.transport.onMessage(async (msg) => {
+      if (!msg || typeof msg !== "object") return;
+      const message = msg as Message;
+      if (typeof message.type !== "string") return;
+
+      const handler = this.handlers.get(message.type);
+      if (handler) {
+        await handler(message);
       }
     });
 
@@ -38,10 +57,8 @@ export class Client {
     await this.transport.write(msg);
   }
 
-  onMessage(handler: (msg: unknown) => void) {
-    this.transport.onMessage((msg) => {
-      handler(msg);
-    });
+  on(type: string, handler: Handler) {
+    this.handlers.set(type, handler);
   }
 
   onDisconnect(handler: () => void) {
