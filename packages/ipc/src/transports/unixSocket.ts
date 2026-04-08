@@ -1,6 +1,6 @@
-import net from "net";
-import fs from "fs";
-import { Transport } from "../core/transport";
+import net from "node:net";
+import fs from "node:fs";
+import { Transport } from "../core/transport.js";
 
 export class UnixSocketTransport implements Transport {
   private socket?: net.Socket; // client

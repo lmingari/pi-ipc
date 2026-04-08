@@ -1,4 +1,4 @@
-import { createTransport } from "../core/createTransport";
+import { createTransport } from "../core/createTransport.js";
 
 export class Client {
   private transport = createTransport("client");

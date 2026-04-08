@@ -1,4 +1,4 @@
-import { Server } from "../src/server/Server";
+import { Server } from "ipc";
 
 async function main() {
   const server = new Server();

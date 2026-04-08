@@ -1,5 +1,5 @@
 {
-  "name": "pi-ipc",
+  "name": "ipc",
   "version": "0.1.0",
   "description": "Unix socket IPC client/server",
   "type": "module",
@@ -13,5 +13,12 @@
   },
   "files": [
     "dist"
-  ]
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "@types/node": "^22.13.1"
+  }
 }

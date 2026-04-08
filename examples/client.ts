@@ -1,4 +1,4 @@
-import { Client } from "../src/client/Client";
+import { Client } from "ipc";
 
 async function main() {
   const name = process.argv[2];

@@ -1,0 +1,15 @@
+{
+  "name": "pi-ipc-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  },
+  "scripts": {
+    "build": "npm -w packages/ipc run build",
+    "example:server": "tsx examples/server.ts",
+    "example:client": "tsx examples/client.ts"
+  }
+}

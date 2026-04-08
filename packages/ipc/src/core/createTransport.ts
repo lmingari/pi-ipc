@@ -1,6 +1,6 @@
 // core/createTransport.ts
-import { Transport } from "./transport";
-import { UnixSocketTransport } from "../transports/unixSocket";
+import { Transport } from "./transport.js";
+import { UnixSocketTransport } from "../transports/unixSocket.js";
 
 export function createTransport(
   role: "server" | "client"

@@ -1,4 +1,4 @@
-import { Message } from "./types";
+import { Message } from "./types.js";
 
 export function isMessage(msg: any): msg is Message {
   if (typeof msg !== "object" || msg === null) return false;

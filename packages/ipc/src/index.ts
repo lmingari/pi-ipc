@@ -1,2 +1,2 @@
-export { Server } from "./server";
-export { Client } from "./client";
+export { Server } from "./server/index.js";
+export { Client } from "./client/index.js";

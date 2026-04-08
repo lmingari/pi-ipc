@@ -1,6 +1,6 @@
-import { createTransport } from "../core/createTransport";
-import { isMessage } from "../protocol/guards";
-import { ClientRegistry } from "./ClientRegistry";
+import { createTransport } from "../core/createTransport.js";
+import { isMessage } from "../protocol/guards.js";
+import { ClientRegistry } from "./ClientRegistry.js";
 
 type Handler = (msg: any, clientName: string) => Promise<void> | void;
 
