@@ -24,6 +24,20 @@ export function isMessage(msg: any): msg is Message {
         (msg.timestamp === undefined || typeof msg.timestamp === "number")
       );
 
+    case "request":
+    case "reply":
+    case "progress":
+    case "cancel":
+    case "ack":
+      return (
+        msg.v === 1 &&
+        typeof msg.from === "string" &&
+        (msg.to === undefined || typeof msg.to === "string") &&
+        (msg.requestId === undefined || typeof msg.requestId === "string") &&
+        typeof msg.timestamp === "number" &&
+        Object.prototype.hasOwnProperty.call(msg, "payload")
+      );
+
     default:
       return false;
   }
