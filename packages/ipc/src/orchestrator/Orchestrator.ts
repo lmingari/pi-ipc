@@ -1,7 +1,14 @@
 import { randomUUID } from "node:crypto";
-import type { Envelope, ProgressEnvelope, ReplyEnvelope, RequestEnvelope, RequestPayload, ReplyPayload } from "./types.js";
-import { isEnvelope, isReplyEnvelope, isRequestEnvelope } from "./types.js";
-import type { Transport } from "./transport.js";
+import type { Client } from "../client/Client.js";
+import type { Server } from "../server/Server.js";
+import type {
+  ProgressEnvelope,
+  ReplyEnvelope,
+  RequestEnvelope,
+  RequestPayload,
+  ReplyPayload,
+} from "../protocol/types.js";
+import { isProgressEnvelope, isReplyEnvelope, isRequestEnvelope } from "../protocol/types.js";
 
 type PendingRequest = {
   resolve: (value: ReplyEnvelope) => void;
@@ -12,6 +19,12 @@ type PendingRequest = {
 type RequestHandler = (request: RequestEnvelope) => Promise<void> | void;
 type ProgressHandler = (progress: ProgressEnvelope) => Promise<void> | void;
 type ReplyHandler = (reply: ReplyEnvelope) => Promise<void> | void;
+
+type Endpoint = Server | Client;
+
+const isServerEndpoint = (endpoint: Endpoint): endpoint is Server => {
+  return typeof (endpoint as Server).onConnect === "function";
+};
 
 export class TimeoutError extends Error {
   constructor(requestId: string, timeoutMs: number) {
@@ -27,12 +40,12 @@ export class Orchestrator {
 
   constructor(
     private readonly nodeId: string,
-    private readonly transport: Transport,
+    private readonly endpoint: Endpoint,
     private readonly defaultTimeoutMs = 60_000,
   ) {
-    this.transport.onMessage(async (message) => {
-      await this.handleIncoming(message);
-    });
+    this.endpoint.on("request", async (msg) => this.handleIncoming(msg));
+    this.endpoint.on("reply", async (msg) => this.handleIncoming(msg));
+    this.endpoint.on("progress", async (msg) => this.handleIncoming(msg));
   }
 
   onRequest(handler: RequestHandler) {
@@ -69,7 +82,7 @@ export class Orchestrator {
       this.pending.set(requestId, { resolve, reject, timeout });
     });
 
-    await this.transport.send(target, request);
+    await this.sendEnvelope(target, request);
 
     return replyPromise;
   }
@@ -86,7 +99,7 @@ export class Orchestrator {
       payload,
     };
 
-    await this.transport.send(target, request);
+    await this.sendEnvelope(target, request);
     return requestId;
   }
 
@@ -101,7 +114,7 @@ export class Orchestrator {
       payload,
     };
 
-    await this.transport.send(target, reply);
+    await this.sendEnvelope(target, reply);
   }
 
   async sendProgress(target: string, requestId: string, payload: ProgressEnvelope["payload"]) {
@@ -115,39 +128,43 @@ export class Orchestrator {
       payload,
     };
 
-    await this.transport.send(target, progress);
+    await this.sendEnvelope(target, progress);
+  }
+
+  private async sendEnvelope(target: string, message: RequestEnvelope | ReplyEnvelope | ProgressEnvelope) {
+    if (isServerEndpoint(this.endpoint)) {
+      await this.endpoint.send(target, message);
+      return;
+    }
+
+    await this.endpoint.send(message);
   }
 
   async handleIncoming(raw: unknown) {
-    if (!isEnvelope(raw)) return;
-
-    const message: Envelope = raw;
-
-    if (isReplyEnvelope(message)) {
-      const pending = this.pending.get(message.requestId);
+    if (isReplyEnvelope(raw)) {
+      const pending = this.pending.get(raw.requestId);
       if (pending) {
         clearTimeout(pending.timeout);
-        this.pending.delete(message.requestId);
-        pending.resolve(message);
+        this.pending.delete(raw.requestId);
+        pending.resolve(raw);
       }
 
       for (const handler of this.replyHandlers) {
-        await handler(message);
+        await handler(raw);
       }
       return;
     }
 
-    if (isRequestEnvelope(message)) {
+    if (isRequestEnvelope(raw)) {
       for (const handler of this.requestHandlers) {
-        await handler(message);
+        await handler(raw);
       }
       return;
     }
 
-    if (message.type === "progress" && typeof message.requestId === "string") {
-      const progress = message as ProgressEnvelope;
+    if (isProgressEnvelope(raw)) {
       for (const handler of this.progressHandlers) {
-        await handler(progress);
+        await handler(raw);
       }
     }
   }

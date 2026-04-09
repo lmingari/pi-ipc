@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { Client, Server } from "ipc";
+import { Client, Orchestrator, Server } from "ipc";
 
 type ClientStatus = "connected" | "disconnected";
 
@@ -16,6 +16,22 @@ type ClientInfo = {
 type LogToolInput = {
   client: string;
   message: string;
+};
+
+type RequestToolInput = {
+  client: string;
+  task: string;
+  expectedFormat?: string;
+  timeoutMs?: number;
+};
+
+type ReplyToolInput = {
+  requestId: string;
+  answer: string;
+  summary?: string;
+  ok?: boolean;
+  error?: string;
+  to?: string;
 };
 
 export default function ipcManagerExtension(pi: ExtensionAPI) {
@@ -34,7 +50,9 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
   let client: Client | null = null;
   let mode: "server" | "client" | null = null;
   let clientPresence: ClientPresence | null = null;
+  let orchestrator: Orchestrator | null = null;
   const clients = new Map<string, ClientInfo>();
+  const inboundRequests = new Map<string, { from: string; task: string; receivedAt: number }>();
 
   const updateClientWidget = (ctx: ExtensionContext) => {
     if (!ctx.hasUI || mode !== "server") return;
@@ -127,6 +145,57 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
     setClientPresence(ctx, nextPresence);
   };
 
+  const setupClientOrchestrator = (ctx: ExtensionContext, clientName: string) => {
+    if (!client) return;
+
+    orchestrator?.close();
+    orchestrator = new Orchestrator(clientName, client);
+
+    orchestrator.onRequest((request) => {
+      inboundRequests.set(request.requestId, {
+        from: request.from,
+        task: request.payload.task,
+        receivedAt: Date.now(),
+      });
+
+      ctx.ui.notify(`IPC request ${request.requestId} from ${request.from}`, "info");
+      pi.sendUserMessage(
+        [
+          `Sub-agent task from '${request.from}'.`,
+          `requestId: ${request.requestId}`,
+          `Task: ${request.payload.task}`,
+          "When finished, call tool 'ipc_send_reply' with the same requestId.",
+          "Keep your own context isolated and only return final scoped result.",
+        ].join("\n"),
+      );
+    });
+
+    orchestrator.onProgress((progress) => {
+      ctx.ui.notify(
+        `IPC progress ${progress.requestId} from ${progress.from}: ${progress.payload.message}`,
+        "info",
+      );
+    });
+  };
+
+  const setupServerOrchestrator = (ctx: ExtensionContext) => {
+    if (!server) return;
+
+    orchestrator?.close();
+    orchestrator = new Orchestrator("master", server);
+
+    orchestrator.onReply((reply) => {
+      ctx.ui.notify(`IPC reply ${reply.requestId} from ${reply.from}`, "success");
+    });
+
+    orchestrator.onProgress((progress) => {
+      ctx.ui.notify(
+        `IPC progress ${progress.requestId} from ${progress.from}: ${progress.payload.message}`,
+        "info",
+      );
+    });
+  };
+
   const connectClient = async (ctx: ExtensionContext, rawName: string) => {
     const name = rawName.trim();
     if (!name) {
@@ -157,10 +226,14 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
     client.onDisconnect(() => {
       client = null;
       clientPresence = null;
+      inboundRequests.clear();
+      orchestrator?.close();
+      orchestrator = null;
       ctx.ui.notify("IPC server disconnected", "warning");
       ctx.ui.setStatus("ipc-client", "IPC: disconnected");
     });
 
+    setupClientOrchestrator(ctx, name);
     ctx.ui.notify(`IPC client connected as ${name}`, "success");
     recomputeClientPresence(ctx);
 
@@ -181,6 +254,57 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
     },
   });
 
+  pi.registerCommand("ipc-reply", {
+    description: "Reply manually to a pending IPC request: /ipc-reply <requestId> <answer>",
+    handler: async (args, ctx) => {
+      if (mode !== "client" || !orchestrator) {
+        ctx.ui.notify("IPC: client orchestrator not ready.", "error");
+        return;
+      }
+
+      const items = Array.isArray(args) ? args.map(String) : [];
+      const requestId = items[0];
+      const answer = items.slice(1).join(" ").trim();
+
+      if (!requestId || !answer) {
+        ctx.ui.notify("Usage: /ipc-reply <requestId> <answer>", "error");
+        return;
+      }
+
+      const pending = inboundRequests.get(requestId);
+      if (!pending) {
+        ctx.ui.notify(`No pending IPC request '${requestId}'.`, "error");
+        return;
+      }
+
+      await orchestrator.sendReply(pending.from, requestId, {
+        ok: true,
+        summary: answer.slice(0, 140),
+        answer,
+      });
+
+      inboundRequests.delete(requestId);
+      ctx.ui.notify(`IPC reply sent for ${requestId}`, "success");
+    },
+  });
+
+  pi.registerCommand("ipc-pending", {
+    description: "List pending IPC requests on this client",
+    handler: async (_args, ctx) => {
+      const ids = [...inboundRequests.keys()];
+      if (ids.length === 0) {
+        ctx.ui.notify("No pending IPC requests.", "info");
+        return;
+      }
+
+      for (const id of ids) {
+        const req = inboundRequests.get(id);
+        if (!req) continue;
+        ctx.ui.notify(`Pending ${id} from ${req.from}: ${req.task}`, "info");
+      }
+    },
+  });
+
   pi.registerTool({
     name: "ipc_send_log",
     label: "IPC Send Log",
@@ -190,7 +314,7 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
       "Use this tool only to send a short message to a specific IPC client.",
       "Only call it when the user explicitly asks to notify/message a client.",
       "Use the exact client name from user/context; if missing, ask first.",
-      "If send fails, report client is disconnected/not found and suggest reconnecting."
+      "If send fails, report client is disconnected/not found and suggest reconnecting.",
     ],
     parameters: Type.Object({
       client: Type.String({ description: "Client name" }),
@@ -219,6 +343,104 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
           },
         ],
         details: { ok: true },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "ipc_request",
+    label: "IPC Request",
+    description: "Send a task request to a client and wait for final reply",
+    promptSnippet: "Delegate a task to a connected IPC client and wait for final result",
+    promptGuidelines: [
+      "Use only in server mode.",
+      "Set a clear, scoped task.",
+      "Use timeout to avoid waiting indefinitely.",
+    ],
+    parameters: Type.Object({
+      client: Type.String({ description: "Target client name" }),
+      task: Type.String({ description: "Delegated task" }),
+      expectedFormat: Type.Optional(Type.String({ description: "Expected output format" })),
+      timeoutMs: Type.Optional(Type.Number({ description: "Timeout in milliseconds" })),
+    }),
+    async execute(_toolCallId, params: RequestToolInput) {
+      if (mode !== "server" || !orchestrator) {
+        throw new Error("IPC request is only available when server orchestrator is running.");
+      }
+
+      const reply = await orchestrator.sendRequest(
+        params.client,
+        {
+          task: params.task,
+          expectedFormat: params.expectedFormat,
+        },
+        params.timeoutMs ?? 120000,
+      );
+
+      const summary = reply.payload.summary ? `\nSummary: ${reply.payload.summary}` : "";
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Reply from ${reply.from} (${reply.requestId}):\n${reply.payload.answer}${summary}`,
+          },
+        ],
+        details: {
+          ok: reply.payload.ok,
+          requestId: reply.requestId,
+          from: reply.from,
+          artifactRefs: reply.payload.artifactRefs ?? [],
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "ipc_send_reply",
+    label: "IPC Send Reply",
+    description: "Send final response for a pending IPC request",
+    promptSnippet: "Reply to a previously received IPC request",
+    promptGuidelines: [
+      "Use only in client mode after receiving an IPC request.",
+      "Use the exact requestId.",
+      "Keep the answer scoped to requested task.",
+    ],
+    parameters: Type.Object({
+      requestId: Type.String({ description: "Request id to resolve" }),
+      answer: Type.String({ description: "Final answer" }),
+      summary: Type.Optional(Type.String({ description: "Short summary" })),
+      ok: Type.Optional(Type.Boolean({ description: "Whether task succeeded" })),
+      error: Type.Optional(Type.String({ description: "Error message when failed" })),
+      to: Type.Optional(Type.String({ description: "Override target node id" })),
+    }),
+    async execute(_toolCallId, params: ReplyToolInput) {
+      if (mode !== "client" || !orchestrator) {
+        throw new Error("IPC reply is only available when client orchestrator is running.");
+      }
+
+      const pending = inboundRequests.get(params.requestId);
+      const target = params.to ?? pending?.from;
+      if (!target) {
+        throw new Error(`Cannot resolve target for request '${params.requestId}'.`);
+      }
+
+      await orchestrator.sendReply(target, params.requestId, {
+        ok: params.ok ?? true,
+        summary: params.summary,
+        answer: params.answer,
+        error: params.error,
+      });
+
+      inboundRequests.delete(params.requestId);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Sent IPC reply for ${params.requestId} to ${target}`,
+          },
+        ],
+        details: { ok: true, requestId: params.requestId, to: target },
       };
     },
   });
@@ -280,6 +502,7 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
         });
       }
 
+      setupServerOrchestrator(ctx);
       updateClientWidget(ctx);
       ctx.ui.notify("IPC server started", "success");
       return;
@@ -323,6 +546,10 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
   }
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    orchestrator?.close();
+    orchestrator = null;
+    inboundRequests.clear();
+
     if (client) {
       await client.close();
       client = null;

@@ -1,6 +1,4 @@
-import { Client } from "ipc";
-import { Orchestrator } from "ipc-orchestrator";
-import { IpcClientTransport } from "ipc-orchestrator/adapters/ipc";
+import { Client, Orchestrator } from "ipc";
 
 async function main() {
   const workerName = process.argv[2] ?? "worker-1";
@@ -15,7 +13,7 @@ async function main() {
   await client.connect();
   console.log(`[worker] connected as ${workerName}`);
 
-  const orchestrator = new Orchestrator(workerName, new IpcClientTransport(client), 30_000);
+  const orchestrator = new Orchestrator(workerName, client, 30_000);
 
   orchestrator.onRequest(async (request) => {
     console.log(`[worker] request ${request.requestId} from ${request.from}: ${request.payload.task}`);

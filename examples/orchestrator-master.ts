@@ -1,8 +1,6 @@
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { Server } from "ipc";
-import { Orchestrator } from "ipc-orchestrator";
-import { IpcServerTransport } from "ipc-orchestrator/adapters/ipc";
+import { Orchestrator, Server } from "ipc";
 
 async function main() {
   const targetClient = process.argv[2] ?? "worker-1";
@@ -28,7 +26,7 @@ async function main() {
     console.log(`[master] client disconnected: ${name}`);
   });
 
-  const orchestrator = new Orchestrator("master", new IpcServerTransport(server), 30_000);
+  const orchestrator = new Orchestrator("master", server, 30_000);
 
   orchestrator.onProgress((progress) => {
     console.log(`[master] progress ${progress.requestId} from ${progress.from}: ${progress.payload.message}`);
