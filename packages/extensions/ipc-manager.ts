@@ -4,7 +4,8 @@ import { Client, Server } from "ipc";
 
 type ClientStatus = "connected" | "disconnected";
 
-type PresenceStatus = "idle" | "busy" | "unknown";
+type ClientPresence = "idle" | "busy";
+type PresenceStatus = ClientPresence | "unknown";
 
 type ClientInfo = {
   status: ClientStatus;
@@ -32,6 +33,7 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
   let server: Server | null = null;
   let client: Client | null = null;
   let mode: "server" | "client" | null = null;
+  let clientPresence: ClientPresence | null = null;
   const clients = new Map<string, ClientInfo>();
 
   const updateClientWidget = (ctx: ExtensionContext) => {
@@ -82,7 +84,7 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
     return name || null;
   };
 
-  const sendClientPresence = async (presence: PresenceStatus) => {
+  const sendClientPresence = async (presence: ClientPresence) => {
     if (!client || !client.isConnected()) return;
 
     try {
@@ -94,6 +96,35 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
     } catch {
       // best-effort presence update; disconnect handler will reflect connection state
     }
+  };
+
+  const setClientStatus = (ctx: ExtensionContext, name: string | null, presence: ClientPresence | null) => {
+    if (!name) {
+      ctx.ui.setStatus("ipc-client", "IPC: disconnected");
+      return;
+    }
+
+    const suffix = presence ? ` (${presence})` : "";
+    ctx.ui.setStatus("ipc-client", `IPC: connected as ${name}${suffix}`);
+  };
+
+  const emitClientPresenceIfChanged = (presence: ClientPresence) => {
+    if (clientPresence === presence) return;
+    clientPresence = presence;
+    pi.events.emit("ipc:presence-changed", { status: presence, timestamp: Date.now() });
+  };
+
+  const setClientPresence = (ctx: ExtensionContext, presence: ClientPresence) => {
+    const name = getConfiguredClientName();
+    emitClientPresenceIfChanged(presence);
+    setClientStatus(ctx, name, presence);
+  };
+
+  const recomputeClientPresence = (ctx: ExtensionContext) => {
+    if (mode !== "client") return;
+
+    const nextPresence: ClientPresence = ctx.isIdle() ? "idle" : "busy";
+    setClientPresence(ctx, nextPresence);
   };
 
   const connectClient = async (ctx: ExtensionContext, rawName: string) => {
@@ -125,13 +156,14 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
     client.on("log", (msg) => handleClientLog(ctx, msg as { message?: string }));
     client.onDisconnect(() => {
       client = null;
+      clientPresence = null;
       ctx.ui.notify("IPC server disconnected", "warning");
       ctx.ui.setStatus("ipc-client", "IPC: disconnected");
     });
 
-    ctx.ui.setStatus("ipc-client", `IPC: connected as ${name}`);
     ctx.ui.notify(`IPC client connected as ${name}`, "success");
-    await sendClientPresence("idle");
+    recomputeClientPresence(ctx);
+
     return true;
   };
 
@@ -189,6 +221,14 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
         details: { ok: true },
       };
     },
+  });
+
+  pi.events.on("ipc:presence-changed", async (event) => {
+    if (mode !== "client") return;
+    const presence = event?.status;
+    if (presence !== "idle" && presence !== "busy") return;
+
+    await sendClientPresence(presence);
   });
 
   pi.on("session_start", async (_event, ctx) => {
@@ -262,22 +302,31 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
     }
   });
 
-  pi.on("agent_start", async (_event, ctx) => {
-    if (mode !== "client") return;
-    await sendClientPresence("busy");
-    ctx.ui.setStatus("ipc-client", `IPC: connected as ${getConfiguredClientName() ?? "client"}`);
-  });
+  const presenceEvents = [
+    "before_agent_start",
+    "agent_start",
+    "tool_execution_start",
+    "tool_execution_end",
+    "turn_end",
+    "agent_end",
+  ] as const;
 
-  pi.on("agent_end", async (_event, ctx) => {
-    if (mode !== "client") return;
-    await sendClientPresence("idle");
-    ctx.ui.setStatus("ipc-client", `IPC: connected as ${getConfiguredClientName() ?? "client"}`);
-  });
+  for (const eventName of presenceEvents) {
+    pi.on(eventName, async (_event, ctx) => {
+      if (eventName === "agent_end") {
+        // Force final state to idle. In some runtimes, pending-message bookkeeping can lag.
+        setClientPresence(ctx, "idle");
+        return;
+      }
+      recomputeClientPresence(ctx);
+    });
+  }
 
   pi.on("session_shutdown", async (_event, ctx) => {
     if (client) {
       await client.close();
       client = null;
+      clientPresence = null;
       ctx.ui.setStatus("ipc-client", undefined);
     }
 
