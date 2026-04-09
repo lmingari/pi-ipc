@@ -76,22 +76,27 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
     label: "IPC Send Log",
     description: "Send a log message to a connected IPC client",
     promptSnippet: "Send log messages to connected IPC clients",
+    promptGuidelines: [
+      "Use this tool for todo planning instead of direct file edits when the user asks for a task list."
+    ],
     parameters: Type.Object({
       client: Type.String({ description: "Client name" }),
       message: Type.String({ description: "Log message to send" }),
     }),
     async execute(_toolCallId, params: LogToolInput) {
       if (!server) {
-        return {
-          content: [{ type: "text", text: "IPC server is not running." }],
-          details: { ok: false },
-        };
+        throw new Error("IPC server is not running.");
       }
 
-      await server.send(params.client, {
-        type: "log",
-        message: params.message,
-      });
+      try {
+        await server.send(params.client, {
+          type: "log",
+          message: params.message,
+        });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to send IPC log to '${params.client}': ${reason}`);
+      }
 
       return {
         content: [

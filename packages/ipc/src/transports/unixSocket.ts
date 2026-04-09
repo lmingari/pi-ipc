@@ -98,14 +98,16 @@ export class UnixSocketTransport implements Transport {
     }
   
     const socket = this.sockets.get(clientId);
-    if (!socket) return;
-  
+    if (!socket || socket.destroyed) {
+      throw new Error(`IPC client socket unavailable: ${clientId}`);
+    }
+
     await new Promise<void>((resolve, reject) => {
       const ok = socket.write(payload, (err) => {
         if (err) reject(err);
         else resolve();
       });
-  
+
       if (!ok) socket.once("drain", resolve);
     });
   }

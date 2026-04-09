@@ -66,8 +66,10 @@ export class Server {
 
   async send(name: string, msg: unknown) {
     const id = this.registry.getId(name);
-    if (!id) return;
-  
+    if (!id) {
+      throw new Error(`IPC client not found or disconnected: ${name}`);
+    }
+
     await this.transport.write(msg, id);
   }
 

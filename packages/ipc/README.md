@@ -40,7 +40,7 @@ await client.send({ type: "sum", a: 1, b: 2 });
 - `onConnect(handler: (name: string) => void): void`
 - `onDisconnect(handler: (name: string) => void): void`
 - `on(type: string, handler: (msg: any, clientName: string) => Promise<void> | void): void`
-- `send(name: string, msg: unknown): Promise<void>`
+- `send(name: string, msg: unknown): Promise<void>` (throws if client is not connected)
 - `broadcast(msg: unknown): Promise<void>`
 - `stop(): Promise<void>`
 
