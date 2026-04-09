@@ -1,81 +1,121 @@
-# PI-IPC
+# ipc-manager extension
 
-IPC package + Pi extension for orchestrating multi-agent sessions over Unix sockets.
+`ipc-manager` is a Pi extension located at `packages/extensions/ipc-manager/`.
 
-## Repo structure
+It adds IPC-based coordination between Pi sessions using Unix sockets.
 
-- `packages/ipc` → core IPC library
-  - `Server` / `Client`
-  - protocol types + guards
-  - `Orchestrator` (request/reply/progress)
-- `packages/extensions/ipc-manager/` → Pi extension (entrypoint: `index.ts`)
-- `examples/` → runnable local examples
+> Dependency note: this extension depends on the `ipc` package in this repo (`packages/ipc`), but this README focuses only on the extension behavior.
 
----
+## What this extension does
 
-## Pi extension (important)
+`ipc-manager` supports two runtime modes:
 
-This repo uses the folder-based extension layout:
+- **Server mode (master session)**: manages connected clients and delegates tasks.
+- **Client mode (child/sub-agent session)**: connects with a client name and receives delegated tasks.
 
-- ✅ extension entrypoint: `packages/extensions/ipc-manager/index.ts`
-- ❌ no separate `packages/extensions/ipc-manager.ts` file needed
+Communication is centered around:
 
-According to Pi extension conventions, the extension is discovered from `index.ts` in the extension folder.
+- server -> client notifications (`ipc_send_log`)
+- server -> client task delegation (`ipc_request`)
+- client -> server final response (`ipc_send_reply`)
 
-### Extension behavior
+## Important limitation
 
-`ipc-manager` supports two modes:
+**Asynchronous communication is not supported yet.**
 
-- `--server` → master session (starts IPC server)
-- `--client <name>` → child session (connects as named IPC client)
+- `ipc_request` is a request/reply flow that waits for a final reply (or timeout).
+- There is no async job queue, background callback, or non-blocking "submit now, collect later" protocol in this extension.
 
-It provides:
+## Flags
 
-- client presence/status UI
-- server→client notifications (`ipc_send_log`)
-- delegated request/reply workflow:
-  - server tool: `ipc_request`
-  - client tool: `ipc_send_reply`
-  - client commands: `/ipc-reply`, `/ipc-pending`, `/ipc-connect`
+Registered flags:
 
----
+- `--server` (boolean, default `false`)
+  - Run the session as IPC server (master).
+- `--client <name>` (string)
+  - Run the session as IPC client with a required non-empty client name.
 
-## Install & build
+Rules:
 
-```bash
-npm install
-npm run build
-```
+- `--server` and `--client` are mutually exclusive.
+- `--client` without a valid name is rejected.
 
-Build is required after changing `packages/ipc`, because extension code imports the built `ipc` output from `dist/`.
+## Slash commands
 
----
+### `/ipc-connect`
 
-## Run examples
+Connects the current session as a client using `--client <name>`.
 
-### Low-level IPC
+- Requires `--client` flag to be set.
+- Useful to retry connection manually.
 
-```bash
-npm run example:server
-npm run example:client -- alice
-```
+### `/ipc-reply <requestId> <answer>`
 
-### Orchestrator flow
+Manual reply to a pending IPC request on a client session.
 
-```bash
-# terminal 1
-npm run example:orchestrator:master -- worker-1
+- Client mode only.
+- Requires an existing pending `requestId`.
 
-# terminal 2
-npm run example:orchestrator:worker -- worker-1
-```
+### `/ipc-pending`
 
-In master terminal, type tasks and press Enter.
+Lists pending request IDs received by this client and not yet replied.
 
----
+## Tools
 
-## Notes
+## `ipc_send_log`
 
-- Keep sub-agent contexts isolated by sending scoped tasks and returning only final result envelopes.
-- For large outputs, return artifact/file references in replies instead of huge inline text.
-- Use request timeouts to avoid indefinite waits.
+Send a short log/notification from server to a specific client.
+
+**Mode:** server
+
+**Parameters:**
+
+- `client: string` – target client name
+- `message: string` – log message
+
+## `ipc_request`
+
+Delegate a task from server to one client and wait for final reply.
+
+**Mode:** server
+
+**Parameters:**
+
+- `client: string` – target client name
+- `task: string` – delegated task text
+- `expectedFormat?: string` – optional output format hint
+- `timeoutMs?: number` – optional timeout (default: `120000`)
+
+**Returns:** final reply payload (answer/summary/details) or throws on timeout/error.
+
+## `ipc_send_reply`
+
+Send a final reply for a pending request from client back to server.
+
+**Mode:** client
+
+**Parameters:**
+
+- `requestId: string` – request to resolve
+- `answer: string` – final answer
+- `summary?: string` – short summary
+- `ok?: boolean` – success flag (default `true`)
+- `error?: string` – optional error text
+- `to?: string` – optional explicit target override
+
+## Presence and UI behavior
+
+- Client presence is tracked as `idle` or `busy` and reported to server.
+- Server UI widget shows known clients and connection/presence state.
+- Client UI status shows connection state and current presence.
+
+## Session lifecycle summary
+
+- On `session_start`:
+  - starts server when `--server`
+  - connects client when `--client <name>`
+- During run:
+  - server tracks client connect/disconnect/status events
+  - client receives requests and can answer via tool or slash command
+- On `session_shutdown`:
+  - closes orchestrator/client/server and clears UI state
