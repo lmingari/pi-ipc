@@ -8,4 +8,4 @@ export type {
   ProgressPayload,
   OrchestratorEnvelope,
 } from "../protocol/types.js";
-export { isReplyEnvelope, isRequestEnvelope, isProgressEnvelope } from "../protocol/types.js";
+export { isReplyEnvelope, isRequestEnvelope, isProgressEnvelope } from "../protocol/guards.js";

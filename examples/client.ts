@@ -26,9 +26,8 @@ async function main() {
 
   try {
     await client.send({
-      type: "sum",
-      a: 10,
-      b: 20,
+      type: "log",
+      message: "hello from client",
     });
   } catch (error) {
     console.error("[client] send failed:", error);

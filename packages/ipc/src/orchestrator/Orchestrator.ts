@@ -8,7 +8,7 @@ import type {
   RequestPayload,
   ReplyPayload,
 } from "../protocol/types.js";
-import { isProgressEnvelope, isReplyEnvelope, isRequestEnvelope } from "../protocol/types.js";
+import { isProgressEnvelope, isReplyEnvelope, isRequestEnvelope } from "../protocol/guards.js";
 
 type PendingRequest = {
   resolve: (value: ReplyEnvelope) => void;

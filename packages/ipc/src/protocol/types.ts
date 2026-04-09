@@ -1,5 +1,21 @@
 export type PresenceStatus = "idle" | "busy";
 
+export type RegisterMessage = {
+  type: "register";
+  clientName: string;
+};
+
+export type LogMessage = {
+  type: "log";
+  message: string;
+};
+
+export type StatusMessage = {
+  type: "status";
+  status: PresenceStatus;
+  timestamp?: number;
+};
+
 export type EnvelopeType = "request" | "reply" | "progress" | "cancel" | "ack";
 
 export type EnvelopeMessage = {
@@ -53,31 +69,4 @@ export type ProgressEnvelope = BaseEnvelope<"progress", ProgressPayload> & {
 
 export type OrchestratorEnvelope = RequestEnvelope | ReplyEnvelope | ProgressEnvelope;
 
-export const isReplyEnvelope = (value: unknown): value is ReplyEnvelope => {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Record<string, unknown>;
-  return candidate.type === "reply" && typeof candidate.requestId === "string";
-};
-
-export const isRequestEnvelope = (value: unknown): value is RequestEnvelope => {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Record<string, unknown>;
-  return (
-    candidate.type === "request" &&
-    typeof candidate.requestId === "string" &&
-    typeof candidate.to === "string"
-  );
-};
-
-export const isProgressEnvelope = (value: unknown): value is ProgressEnvelope => {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Record<string, unknown>;
-  return candidate.type === "progress" && typeof candidate.requestId === "string";
-};
-
-export type Message =
-  | { type: "register"; clientName: string }
-  | { type: "sum"; a: number; b: number }
-  | { type: "log"; message: string }
-  | { type: "status"; status: PresenceStatus; timestamp?: number }
-  | EnvelopeMessage;
+export type Message = RegisterMessage | LogMessage | StatusMessage | EnvelopeMessage;

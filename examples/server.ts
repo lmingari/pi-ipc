@@ -8,19 +8,17 @@ async function main() {
   server.onConnect((name) => {
     console.log(`Client connected: ${name}`);
   });
-  
+
   server.onDisconnect((name) => {
     console.log(`Client disconnected: ${name}`);
   });
 
-  server.on("sum", async (msg, clientName) => {
-    console.log(`sum from ${clientName}`);
-
-    const result = msg.a + msg.b;
+  server.on("log", async (msg, clientName) => {
+    console.log(`log from ${clientName}: ${msg.message}`);
 
     await server.send(clientName, {
       type: "log",
-      message: `Result: ${result}`,
+      message: `Ack: ${msg.message}`,
     });
   });
 }
