@@ -18,6 +18,12 @@ export function isMessage(msg: any): msg is Message {
         typeof msg.message === "string"
       );
 
+    case "status":
+      return (
+        (msg.status === "idle" || msg.status === "busy") &&
+        (msg.timestamp === undefined || typeof msg.timestamp === "number")
+      );
+
     default:
       return false;
   }
