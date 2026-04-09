@@ -9,22 +9,36 @@ async function main() {
 
   const client = new Client(name);
 
-  await client.connect();
+  client.onDisconnect(() => {
+    console.warn("[client] server disconnected");
+  });
+
+  try {
+    await client.connect();
+  } catch (error) {
+    console.error("[client] failed to connect:", error);
+    process.exit(1);
+  }
 
   client.on("log", (msg) => {
     console.log("received:", msg);
   });
 
-//  await client.send({
-//    type: "log",
-//    message: "hola",
-//  });
+  try {
+    await client.send({
+      type: "sum",
+      a: 10,
+      b: 20,
+    });
+  } catch (error) {
+    console.error("[client] send failed:", error);
+  }
 
-  await client.send({
-    type: "sum",
-    a: 10,
-    b: 20,
-  });
+  console.log("[client] waiting... press Ctrl+C to exit");
+  process.stdin.resume();
 }
 
-main();
+main().catch((error) => {
+  console.error("[client] fatal:", error);
+  process.exit(1);
+});

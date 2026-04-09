@@ -50,7 +50,7 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
       if (info.status === "connected") {
         connectedCount += 1;
       }
-      const statusIcon = info.status === "connected" ? "🟢" : "⚪";
+      const statusIcon = info.status === "connected" ? "" : "";
       lines.push(`${statusIcon} ${name} (${info.status})`);
     }
 
@@ -70,6 +70,65 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
       display: true,
     });
   };
+
+  const getConfiguredClientName = () => {
+    const clientFlag = pi.getFlag("client");
+    if (typeof clientFlag !== "string") return null;
+    const name = clientFlag.trim();
+    return name || null;
+  };
+
+  const connectClient = async (ctx: ExtensionContext, rawName: string) => {
+    const name = rawName.trim();
+    if (!name) {
+      ctx.ui.setStatus("ipc-client", "IPC: disconnected");
+      ctx.ui.notify("IPC: client name is required.", "error");
+      return false;
+    }
+
+    if (client) {
+      await client.close();
+      client = null;
+    }
+
+    mode = "client";
+    const nextClient = new Client(name);
+
+    try {
+      await nextClient.connect();
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      ctx.ui.setStatus("ipc-client", "IPC: disconnected");
+      ctx.ui.notify(`IPC client failed to connect as ${name}: ${reason}`, "error");
+      return false;
+    }
+
+    client = nextClient;
+    client.on("log", (msg) => handleClientLog(ctx, msg as { message?: string }));
+    client.onDisconnect(() => {
+      client = null;
+      ctx.ui.notify("IPC server disconnected", "warning");
+      ctx.ui.setStatus("ipc-client", "IPC: disconnected");
+    });
+
+    ctx.ui.setStatus("ipc-client", `IPC: connected as ${name}`);
+    ctx.ui.notify(`IPC client connected as ${name}`, "success");
+    return true;
+  };
+
+  pi.registerCommand("ipc-connect", {
+    description: "Connect IPC client using --client flag name",
+    handler: async (_args, ctx) => {
+      const name = getConfiguredClientName();
+      if (!name) {
+        ctx.ui.setStatus("ipc-client", "IPC: disconnected");
+        ctx.ui.notify("IPC: set --client <name> to use /ipc-connect.", "error");
+        return;
+      }
+
+      await connectClient(ctx, name);
+    },
+  });
 
   pi.registerTool({
     name: "ipc_send_log",
@@ -151,25 +210,14 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
     }
 
     if (wantsClient) {
-      mode = "client";
-
-      const name = clientFlag.trim();
+      const name = getConfiguredClientName();
       if (!name) {
+        ctx.ui.setStatus("ipc-client", "IPC: disconnected");
         ctx.ui.notify("IPC: --client requires a non-empty name.", "error");
         return;
       }
 
-      client = new Client(name);
-      await client.connect();
-
-      client.on("log", (msg) => handleClientLog(ctx, msg as { message?: string }));
-      client.onDisconnect(() => {
-        ctx.ui.notify("IPC server disconnected", "warning");
-        ctx.ui.setStatus("ipc-client", "IPC: disconnected");
-      });
-
-      ctx.ui.setStatus("ipc-client", `IPC: connected as ${name}`);
-      ctx.ui.notify(`IPC client connected as ${name}`, "success");
+      await connectClient(ctx, name);
     }
   });
 

@@ -7,6 +7,7 @@ type Handler = (msg: Message) => Promise<void> | void;
 export class Client {
   private transport = createTransport("client");
   private connected = false;
+  private closing = false;
   private disconnectHandlers: (() => void)[] = [];
   private handlers = new Map<string, Handler>();
 
@@ -16,10 +17,13 @@ export class Client {
     if (this.connected) return;
 
     await this.transport.connect();
+    this.closing = false;
 
     this.transport.onDisconnect(() => {
       this.connected = false;
-  
+
+      if (this.closing) return;
+
       // notify user handlers
       for (const h of this.disconnectHandlers) {
         h();
@@ -63,8 +67,13 @@ export class Client {
   async close() {
     if (!this.connected) return;
 
-    await this.transport.close();
-    this.connected = false;
+    this.closing = true;
+    try {
+      await this.transport.close();
+    } finally {
+      this.connected = false;
+      this.closing = false;
+    }
   }
 
   isConnected() {

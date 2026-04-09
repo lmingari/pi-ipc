@@ -41,14 +41,39 @@ export class UnixSocketTransport implements Transport {
     // client mode
     return new Promise((resolve, reject) => {
       const socket = net.createConnection(this.path);
+      let connected = false;
+      let disconnectNotified = false;
+
+      const notifyDisconnect = () => {
+        if (disconnectNotified) return;
+        disconnectNotified = true;
+        this.socket = undefined;
+        this.disconnectHandler?.();
+      };
 
       socket.on("connect", () => {
+        connected = true;
         this.socket = socket;
         this.attachSocket(socket);
         resolve();
       });
 
-      socket.on("error", reject);
+      socket.on("close", () => {
+        notifyDisconnect();
+      });
+
+      socket.on("end", () => {
+        notifyDisconnect();
+      });
+
+      socket.on("error", (err) => {
+        if (!connected) {
+          reject(err);
+          return;
+        }
+
+        notifyDisconnect();
+      });
     });
   }
 
@@ -78,17 +103,17 @@ export class UnixSocketTransport implements Transport {
   
     // CLIENT MODE
     if (this.mode === "client") {
-      if (!this.socket) throw new Error("Not connected");
-  
+      if (!this.socket || this.socket.destroyed) throw new Error("Not connected");
+
       await new Promise<void>((resolve, reject) => {
         const ok = this.socket!.write(payload, (err) => {
           if (err) reject(err);
           else resolve();
         });
-  
+
         if (!ok) this.socket!.once("drain", resolve);
       });
-  
+
       return;
     }
   
