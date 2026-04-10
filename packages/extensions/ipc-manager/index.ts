@@ -9,7 +9,18 @@ import {
   setClientStatus,
   updateClientWidget,
 } from "./helpers";
-import type { ClientInfo, ClientPresence, LogToolInput, ReplyToolInput, RequestToolInput } from "./types";
+import { AsyncRequestStore } from "./asyncRequests";
+import type {
+  ClientInfo,
+  ClientPresence,
+  LogToolInput,
+  ReplyToolInput,
+  RequestAsyncToolInput,
+  RequestListToolInput,
+  RequestStatusToolInput,
+  RequestToolInput,
+  RequestWaitToolInput,
+} from "./types";
 
 export default function ipcManagerExtension(pi: ExtensionAPI) {
   pi.registerFlag("server", {
@@ -30,6 +41,7 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
   let orchestrator: Orchestrator | null = null;
   const clients = new Map<string, ClientInfo>();
   const inboundRequests = new Map<string, { from: string; task: string; receivedAt: number }>();
+  const asyncRequests = new AsyncRequestStore();
 
   const emitClientPresenceIfChanged = (presence: ClientPresence) => {
     if (clientPresence === presence) return;
@@ -83,7 +95,9 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
     orchestrator = new Orchestrator("master", server);
 
     orchestrator.onReply((reply) => {
-      ctx.ui.notify(`IPC reply ${reply.requestId} from ${reply.from}`, "success");
+      const tracked = asyncRequests.markCompleted(reply);
+      const suffix = tracked ? " (async request completed)" : "";
+      ctx.ui.notify(`IPC reply ${reply.requestId} from ${reply.from}${suffix}`, "success");
     });
 
     orchestrator.onProgress((progress) => {
@@ -294,6 +308,209 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "ipc_request_async",
+    label: "IPC Request Async",
+    description: "Send a task request to a client and return immediately with requestId",
+    promptSnippet: "Delegate a task to a connected IPC client without waiting for the final result",
+    promptGuidelines: [
+      "Use only in server mode.",
+      "Use this when work should continue in the background.",
+      "Capture the returned requestId and inspect it later with ipc_request_status or ipc_request_wait.",
+    ],
+    parameters: Type.Object({
+      client: Type.String({ description: "Target client name" }),
+      task: Type.String({ description: "Delegated task" }),
+      expectedFormat: Type.Optional(Type.String({ description: "Expected output format" })),
+    }),
+    async execute(_toolCallId, params: RequestAsyncToolInput) {
+      if (mode !== "server" || !orchestrator) {
+        throw new Error("Async IPC request is only available when server orchestrator is running.");
+      }
+
+      const requestId = await orchestrator.sendRequestAsync(params.client, {
+        task: params.task,
+        expectedFormat: params.expectedFormat,
+      });
+
+      const tracked = asyncRequests.trackSubmitted({
+        requestId,
+        client: params.client,
+        task: params.task,
+        expectedFormat: params.expectedFormat,
+      });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Submitted async IPC request ${requestId} to ${params.client}`,
+          },
+        ],
+        details: {
+          ok: true,
+          requestId,
+          status: tracked.status,
+          submittedAt: tracked.submittedAt,
+          client: tracked.client,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "ipc_request_status",
+    label: "IPC Request Status",
+    description: "Get status of a previously submitted async IPC request",
+    promptSnippet: "Check whether an async IPC request is pending or completed",
+    promptGuidelines: [
+      "Use only in server mode.",
+      "Provide the exact requestId returned by ipc_request_async.",
+      "If completed and full payload is needed, use ipc_request_wait (or inspect details).",
+    ],
+    parameters: Type.Object({
+      requestId: Type.String({ description: "Request id returned by ipc_request_async" }),
+    }),
+    async execute(_toolCallId, params: RequestStatusToolInput) {
+      if (mode !== "server") {
+        throw new Error("IPC request status is only available in server mode.");
+      }
+
+      const tracked = asyncRequests.get(params.requestId);
+      if (!tracked) {
+        throw new Error(`Unknown async IPC request '${params.requestId}'.`);
+      }
+
+      const text =
+        tracked.status === "pending"
+          ? `IPC request ${tracked.requestId} is pending (client: ${tracked.client}).`
+          : `IPC request ${tracked.requestId} completed by ${tracked.reply?.from ?? tracked.client}.`;
+
+      return {
+        content: [
+          {
+            type: "text",
+            text,
+          },
+        ],
+        details: {
+          ok: true,
+          requestId: tracked.requestId,
+          status: tracked.status,
+          client: tracked.client,
+          submittedAt: tracked.submittedAt,
+          completedAt: tracked.completedAt,
+          reply: tracked.reply?.payload,
+          from: tracked.reply?.from,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "ipc_request_list",
+    label: "IPC Request List",
+    description: "List tracked async IPC requests",
+    promptSnippet: "List pending/completed async IPC requests on master",
+    promptGuidelines: [
+      "Use only in server mode.",
+      "Use filters to keep output focused.",
+    ],
+    parameters: Type.Object({
+      status: Type.Optional(
+        Type.Union([
+          Type.Literal("pending"),
+          Type.Literal("completed"),
+          Type.Literal("all"),
+        ], { description: "Filter by request status" }),
+      ),
+      client: Type.Optional(Type.String({ description: "Filter by client name" })),
+      limit: Type.Optional(Type.Number({ description: "Max items to return (default 20)" })),
+    }),
+    async execute(_toolCallId, params: RequestListToolInput) {
+      if (mode !== "server") {
+        throw new Error("IPC request list is only available in server mode.");
+      }
+
+      const items = asyncRequests.list({
+        status: params.status,
+        client: params.client,
+        limit: params.limit,
+      });
+
+      if (items.length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "No async IPC requests match the provided filters.",
+            },
+          ],
+          details: { ok: true, count: 0, items: [] },
+        };
+      }
+
+      const lines = items.map((entry) => {
+        const done = entry.completedAt ? `, completedAt=${entry.completedAt}` : "";
+        return `${entry.requestId} [${entry.status}] client=${entry.client}, submittedAt=${entry.submittedAt}${done}`;
+      });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: lines.join("\n"),
+          },
+        ],
+        details: { ok: true, count: items.length, items },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "ipc_request_wait",
+    label: "IPC Request Wait",
+    description: "Wait for completion of a tracked async IPC request",
+    promptSnippet: "Wait until an async IPC request completes and return its final reply",
+    promptGuidelines: [
+      "Use only in server mode.",
+      "Provide requestId from ipc_request_async.",
+      "Use timeoutMs to avoid waiting indefinitely.",
+    ],
+    parameters: Type.Object({
+      requestId: Type.String({ description: "Request id returned by ipc_request_async" }),
+      timeoutMs: Type.Optional(Type.Number({ description: "Wait timeout in milliseconds (default 120000)" })),
+    }),
+    async execute(_toolCallId, params: RequestWaitToolInput) {
+      if (mode !== "server") {
+        throw new Error("IPC request wait is only available in server mode.");
+      }
+
+      const tracked = await asyncRequests.waitFor(params.requestId, params.timeoutMs ?? 120000);
+      const reply = tracked.reply;
+      if (!reply) {
+        throw new Error(`Async IPC request '${params.requestId}' completed without reply payload.`);
+      }
+
+      const summary = reply.payload.summary ? `\nSummary: ${reply.payload.summary}` : "";
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Reply from ${reply.from} (${reply.requestId}):\n${reply.payload.answer}${summary}`,
+          },
+        ],
+        details: {
+          ok: reply.payload.ok,
+          requestId: reply.requestId,
+          from: reply.from,
+          artifactRefs: reply.payload.artifactRefs ?? [],
+          completedAt: tracked.completedAt,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "ipc_send_reply",
     label: "IPC Send Reply",
     description: "Send final response for a pending IPC request",
@@ -446,6 +663,7 @@ export default function ipcManagerExtension(pi: ExtensionAPI) {
     orchestrator?.close();
     orchestrator = null;
     inboundRequests.clear();
+    asyncRequests.clear();
 
     if (client) {
       await client.close();

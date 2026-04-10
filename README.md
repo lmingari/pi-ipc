@@ -16,15 +16,17 @@ It adds IPC-based coordination between Pi sessions using Unix sockets.
 Communication is centered around:
 
 - server -> client notifications (`ipc_send_log`)
-- server -> client task delegation (`ipc_request`)
+- server -> client task delegation (`ipc_request`, `ipc_request_async`)
 - client -> server final response (`ipc_send_reply`)
+- server-side async request tracking (`ipc_request_status`, `ipc_request_list`, `ipc_request_wait`)
 
-## Important limitation
+## Async behavior
 
-**Asynchronous communication is not supported yet.**
+The extension supports both blocking and async request flows:
 
-- `ipc_request` is a request/reply flow that waits for a final reply (or timeout).
-- There is no async job queue, background callback, or non-blocking "submit now, collect later" protocol in this extension.
+- `ipc_request` is blocking request/reply with timeout.
+- `ipc_request_async` is non-blocking and returns a `requestId` immediately.
+- Async requests are tracked on server and can be inspected/waited later.
 
 ## Flags
 
@@ -87,6 +89,55 @@ Delegate a task from server to one client and wait for final reply.
 - `timeoutMs?: number` – optional timeout (default: `120000`)
 
 **Returns:** final reply payload (answer/summary/details) or throws on timeout/error.
+
+## `ipc_request_async`
+
+Delegate a task from server to one client and return immediately with a `requestId`.
+
+**Mode:** server
+
+**Parameters:**
+
+- `client: string` – target client name
+- `task: string` – delegated task text
+- `expectedFormat?: string` – optional output format hint
+
+**Returns:** accepted request metadata including `requestId` and initial `pending` status.
+
+## `ipc_request_status`
+
+Check a tracked async request by `requestId`.
+
+**Mode:** server
+
+**Parameters:**
+
+- `requestId: string` – id returned by `ipc_request_async`
+
+**Returns:** request status (`pending` or `completed`) and, when completed, reply details.
+
+## `ipc_request_list`
+
+List tracked async requests on server.
+
+**Mode:** server
+
+**Parameters:**
+
+- `status?: "pending" | "completed" | "all"` – optional status filter
+- `client?: string` – optional client filter
+- `limit?: number` – max number of returned entries (default `20`)
+
+## `ipc_request_wait`
+
+Wait for completion of a tracked async request and return final reply.
+
+**Mode:** server
+
+**Parameters:**
+
+- `requestId: string` – id returned by `ipc_request_async`
+- `timeoutMs?: number` – optional wait timeout (default `120000`)
 
 ## `ipc_send_reply`
 
