@@ -53,28 +53,16 @@ export const createClientRole = (pi: ExtensionAPI) => {
       });
 
       ctx.ui.notify(`IPC request ${request.requestId} from ${request.from}`, "info");
-      pi.sendMessage(
-        {
-          customType: "ipc-request",
-          content: [
-            `Sub-agent task from '${request.from}'.`,
-            `requestId: ${request.requestId}`,
-            `Task: ${request.payload.task}`,
-            "When finished, call tool 'ipc_send_reply' with the same requestId.",
-            "Keep your own context isolated and only return final scoped result.",
-          ].join("\n"),
-          display: true,
-          details: {
-            requestId: request.requestId,
-            from: request.from,
-            task: request.payload.task,
-            expectedFormat: request.payload.expectedFormat,
-          },
-        },
-        {
-          triggerTurn: true,
-          deliverAs: "followUp",
-        },
+      pi.sendUserMessage(
+        [
+          `Sub-agent task from '${request.from}'.`,
+          `requestId: ${request.requestId}`,
+          `Task: ${request.payload.task}`,
+          "Provide the full final answer in this client session.",
+          "Then call tool 'ipc_send_reply' with the same requestId, answer, and summary.",
+          "Keep your own context isolated and only return final scoped result.",
+        ].join("\n"),
+        { deliverAs: "followUp" },
       );
     });
 
@@ -206,6 +194,7 @@ export const createClientRole = (pi: ExtensionAPI) => {
         "Use the exact requestId from the received task.",
         "Return only the final scoped result for that task.",
         "Set ok=false and provide error when the task failed.",
+        "Keep answer and summary aligned with the final client response.",
       ],
       parameters: Type.Object({
         requestId: Type.String({ description: "Request id to resolve" }),
