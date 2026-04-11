@@ -4,6 +4,12 @@
   "workspaces": [
     "packages/*"
   ],
+  "pi": {
+    "extensions": [
+      "packages/extensions/ipc-manager/server.ts",
+      "packages/extensions/ipc-manager/client.ts"
+    ]
+  },
   "devDependencies": {
     "tsx": "^4.19.2"
   },

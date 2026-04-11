@@ -1,15 +1,9 @@
 import type { ReplyEnvelope } from "ipc";
 import type { AsyncRequestEntry, AsyncRequestStatusFilter } from "./types";
 
-type AsyncWaiter = {
-  resolve: (value: AsyncRequestEntry) => void;
-  reject: (reason?: unknown) => void;
-  timeout: NodeJS.Timeout;
-};
-
 export class AsyncRequestStore {
   private readonly requests = new Map<string, AsyncRequestEntry>();
-  private readonly waiters = new Map<string, Set<AsyncWaiter>>();
+  private readonly orphanReplies = new Map<string, ReplyEnvelope>();
 
   trackSubmitted(input: {
     requestId: string;
@@ -17,6 +11,24 @@ export class AsyncRequestStore {
     task: string;
     expectedFormat?: string;
   }): AsyncRequestEntry {
+    const orphanReply = this.orphanReplies.get(input.requestId);
+    if (orphanReply) {
+      this.orphanReplies.delete(input.requestId);
+      const completed: AsyncRequestEntry = {
+        requestId: input.requestId,
+        client: input.client,
+        task: input.task,
+        expectedFormat: input.expectedFormat,
+        submittedAt: Date.now(),
+        status: "completed",
+        completedAt: Date.now(),
+        reply: orphanReply,
+      };
+
+      this.requests.set(input.requestId, completed);
+      return completed;
+    }
+
     const entry: AsyncRequestEntry = {
       requestId: input.requestId,
       client: input.client,
@@ -32,7 +44,10 @@ export class AsyncRequestStore {
 
   markCompleted(reply: ReplyEnvelope): AsyncRequestEntry | null {
     const existing = this.requests.get(reply.requestId);
-    if (!existing) return null;
+    if (!existing) {
+      this.orphanReplies.set(reply.requestId, reply);
+      return null;
+    }
 
     const completed: AsyncRequestEntry = {
       ...existing,
@@ -42,15 +57,6 @@ export class AsyncRequestStore {
     };
 
     this.requests.set(reply.requestId, completed);
-    const waiters = this.waiters.get(reply.requestId);
-    if (waiters) {
-      for (const waiter of waiters) {
-        clearTimeout(waiter.timeout);
-        waiter.resolve(completed);
-      }
-      this.waiters.delete(reply.requestId);
-    }
-
     return completed;
   }
 
@@ -75,47 +81,8 @@ export class AsyncRequestStore {
     return items;
   }
 
-  async waitFor(requestId: string, timeoutMs: number) {
-    const existing = this.requests.get(requestId);
-    if (!existing) {
-      throw new Error(`Unknown async IPC request '${requestId}'.`);
-    }
-
-    if (existing.status === "completed") {
-      return existing;
-    }
-
-    return new Promise<AsyncRequestEntry>((resolve, reject) => {
-      const waiter: AsyncWaiter = {
-        resolve,
-        reject,
-        timeout: setTimeout(() => {
-          const set = this.waiters.get(requestId);
-          if (set) {
-            set.delete(waiter);
-            if (set.size === 0) {
-              this.waiters.delete(requestId);
-            }
-          }
-          reject(new Error(`Timed out waiting for async IPC request '${requestId}' after ${timeoutMs}ms`));
-        }, timeoutMs),
-      };
-
-      const waiters = this.waiters.get(requestId) ?? new Set<AsyncWaiter>();
-      waiters.add(waiter);
-      this.waiters.set(requestId, waiters);
-    });
-  }
-
   clear() {
-    for (const waiters of this.waiters.values()) {
-      for (const waiter of waiters) {
-        clearTimeout(waiter.timeout);
-        waiter.reject(new Error("Async IPC request store cleared before completion."));
-      }
-    }
-
-    this.waiters.clear();
     this.requests.clear();
+    this.orphanReplies.clear();
   }
 }

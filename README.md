@@ -16,17 +16,63 @@ It adds IPC-based coordination between Pi sessions using Unix sockets.
 Communication is centered around:
 
 - server -> client notifications (`ipc_send_log`)
-- server -> client task delegation (`ipc_request`, `ipc_request_async`)
+- server -> client task delegation (`ipc_request`)
 - client -> server final response (`ipc_send_reply`)
-- server-side async request tracking (`ipc_request_status`, `ipc_request_list`, `ipc_request_wait`)
+- server-side request tracking (`ipc_request_status`, `ipc_request_list`)
 
 ## Async behavior
 
-The extension supports both blocking and async request flows:
+The extension uses async request flow:
 
-- `ipc_request` is blocking request/reply with timeout.
-- `ipc_request_async` is non-blocking and returns a `requestId` immediately.
-- Async requests are tracked on server and can be inspected/waited later.
+- `ipc_request` is non-blocking and returns a `requestId` immediately.
+- Requests are tracked on server and can be inspected later.
+- On completion, server pushes a notification via UI and `pi.sendMessage(..., { triggerTurn: true, deliverAs: "followUp" })`.
+
+## Extension entrypoints
+
+The package uses role-stacked loading:
+
+- `packages/extensions/ipc-manager/server.ts`
+- `packages/extensions/ipc-manager/client.ts`
+
+When Pi runs without `--server` or `--client`, the extension remains passive (no IPC tools/commands are registered for the session).
+
+### Package manifest example (`package.json`)
+
+```json
+{
+  "pi": {
+    "extensions": [
+      "packages/extensions/ipc-manager/server.ts",
+      "packages/extensions/ipc-manager/client.ts"
+    ]
+  }
+}
+```
+
+### How to run Pi
+
+Stacked entrypoints:
+
+```bash
+pi \
+  -e ./packages/extensions/ipc-manager/server.ts \
+  -e ./packages/extensions/ipc-manager/client.ts \
+  --server
+
+pi \
+  -e ./packages/extensions/ipc-manager/server.ts \
+  -e ./packages/extensions/ipc-manager/client.ts \
+  --client carlos
+```
+
+No IPC mode (standard Pi session unchanged):
+
+```bash
+pi \
+  -e ./packages/extensions/ipc-manager/server.ts \
+  -e ./packages/extensions/ipc-manager/client.ts
+```
 
 ## Flags
 
@@ -77,21 +123,6 @@ Send a short log/notification from server to a specific client.
 
 ## `ipc_request`
 
-Delegate a task from server to one client and wait for final reply.
-
-**Mode:** server
-
-**Parameters:**
-
-- `client: string` – target client name
-- `task: string` – delegated task text
-- `expectedFormat?: string` – optional output format hint
-- `timeoutMs?: number` – optional timeout (default: `120000`)
-
-**Returns:** final reply payload (answer/summary/details) or throws on timeout/error.
-
-## `ipc_request_async`
-
 Delegate a task from server to one client and return immediately with a `requestId`.
 
 **Mode:** server
@@ -112,7 +143,7 @@ Check a tracked async request by `requestId`.
 
 **Parameters:**
 
-- `requestId: string` – id returned by `ipc_request_async`
+- `requestId: string` – id returned by `ipc_request`
 
 **Returns:** request status (`pending` or `completed`) and, when completed, reply details.
 
@@ -127,17 +158,6 @@ List tracked async requests on server.
 - `status?: "pending" | "completed" | "all"` – optional status filter
 - `client?: string` – optional client filter
 - `limit?: number` – max number of returned entries (default `20`)
-
-## `ipc_request_wait`
-
-Wait for completion of a tracked async request and return final reply.
-
-**Mode:** server
-
-**Parameters:**
-
-- `requestId: string` – id returned by `ipc_request_async`
-- `timeoutMs?: number` – optional wait timeout (default `120000`)
 
 ## `ipc_send_reply`
 

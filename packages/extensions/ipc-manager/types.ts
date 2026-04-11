@@ -34,13 +34,6 @@ export type RequestToolInput = {
   client: string;
   task: string;
   expectedFormat?: string;
-  timeoutMs?: number;
-};
-
-export type RequestAsyncToolInput = {
-  client: string;
-  task: string;
-  expectedFormat?: string;
 };
 
 export type RequestStatusToolInput = {
@@ -51,11 +44,6 @@ export type RequestListToolInput = {
   status?: AsyncRequestStatusFilter;
   client?: string;
   limit?: number;
-};
-
-export type RequestWaitToolInput = {
-  requestId: string;
-  timeoutMs?: number;
 };
 
 export type ReplyToolInput = {
