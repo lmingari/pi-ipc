@@ -88,6 +88,39 @@ Rules:
 - `--server` and `--client` are mutually exclusive.
 - `--client` without a valid name is rejected.
 
+### Role config from `subagents/*.md`
+
+At startup, IPC roles look for markdown config files in a `subagents/` directory,
+starting from current working directory and walking up parent directories.
+
+- Client mode (`--client carlos`) -> `subagents/carlos.md`
+- Server mode (`--server`) -> `subagents/master.md`
+
+If found:
+
+- Frontmatter is applied **only when corresponding CLI flags are not set**.
+- Markdown body is appended to the system prompt for turns in that role
+
+Supported frontmatter keys:
+
+- `model` (e.g. `openai/gpt-5` or `openai/gpt-5:low`)
+- `thinking` (`off|minimal|low|medium|high|xhigh`)
+- `tools` (comma/space-separated string or array)
+- `no-tools: true` (disables tools)
+
+Example (`subagents/carlos.md`):
+
+```md
+---
+model: anthropic/claude-sonnet-4
+thinking: medium
+tools: read,edit,bash
+---
+
+You are Carlos, focused on backend changes.
+Prefer concise updates and include file paths in outputs.
+```
+
 ## Slash commands
 
 ### `/ipc-connect`

@@ -8,6 +8,7 @@ import {
   sendClientPresence,
   setClientStatus,
 } from "./helpers";
+import { loadAndApplySessionConfig } from "./sessionConfig";
 import type { ClientPresence, ReplyToolInput } from "./types";
 
 const PRESENCE_EVENTS = [
@@ -53,16 +54,29 @@ export const createClientRole = (pi: ExtensionAPI) => {
       });
 
       ctx.ui.notify(`IPC request ${request.requestId} from ${request.from}`, "info");
-      pi.sendUserMessage(
-        [
-          `Sub-agent task from '${request.from}'.`,
-          `requestId: ${request.requestId}`,
-          `Task: ${request.payload.task}`,
-          "Provide the full final answer in this client session.",
-          "Then call tool 'ipc_send_reply' with the same requestId, answer, and summary.",
-          "Keep your own context isolated and only return final scoped result.",
-        ].join("\n"),
-        { deliverAs: "followUp" },
+      pi.sendMessage(
+        {
+          customType: "ipc-request",
+          content: [
+            `Sub-agent task from '${request.from}'.`,
+            `requestId: ${request.requestId}`,
+            `Task: ${request.payload.task}`,
+            "Provide the full final answer in this client session.",
+            "Then call tool 'ipc_send_reply' with the same requestId, answer, and summary.",
+            "Keep your own context isolated and only return final scoped result.",
+          ].join("\n"),
+          display: true,
+          details: {
+            requestId: request.requestId,
+            from: request.from,
+            task: request.payload.task,
+            expectedFormat: request.payload.expectedFormat,
+          },
+        },
+        {
+          triggerTurn: true,
+          deliverAs: "followUp",
+        },
       );
     });
 
@@ -296,6 +310,8 @@ export const createClientRole = (pi: ExtensionAPI) => {
 };
 
 export default function ipcClientExtension(pi: ExtensionAPI) {
+  let clientResolvedSystemPrompt: string | null = null;
+
   pi.registerFlag("client", {
     description: "Run IPC client (child session) with required name: --client <name>",
     type: "string",
@@ -326,10 +342,21 @@ export default function ipcClientExtension(pi: ExtensionAPI) {
       return;
     }
 
+    const config = await loadAndApplySessionConfig(pi, ctx, name);
+    clientResolvedSystemPrompt = config?.mdPromptBody || null;
+
     await clientRole.start(ctx, name);
   });
 
+  pi.on("before_agent_start", async (event) => {
+    if (!clientResolvedSystemPrompt) return;
+    return {
+      systemPrompt: `${event.systemPrompt}\n\n${clientResolvedSystemPrompt}`,
+    };
+  });
+
   pi.on("session_shutdown", async (_event, ctx) => {
+    clientResolvedSystemPrompt = null;
     await clientRole.shutdown(ctx);
   });
 }
