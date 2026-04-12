@@ -6,8 +6,7 @@
   ],
   "pi": {
     "extensions": [
-      "packages/extensions/ipc-manager/server.ts",
-      "packages/extensions/ipc-manager/client.ts"
+      "packages/extensions/ipc-manager/index.ts"
     ]
   },
   "devDependencies": {

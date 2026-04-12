@@ -8,7 +8,6 @@ import {
   sendClientPresence,
   setClientStatus,
 } from "./helpers";
-import { loadAndApplySessionConfig } from "./sessionConfig";
 import type { ClientPresence, ReplyToolInput } from "./types";
 
 const PRESENCE_EVENTS = [
@@ -308,55 +307,3 @@ export const createClientRole = (pi: ExtensionAPI) => {
     },
   };
 };
-
-export default function ipcClientExtension(pi: ExtensionAPI) {
-  let clientResolvedSystemPrompt: string | null = null;
-
-  pi.registerFlag("client", {
-    description: "Run IPC client (child session) with required name: --client <name>",
-    type: "string",
-  });
-
-  const clientRole = createClientRole(pi);
-
-  pi.on("session_start", async (_event, ctx) => {
-    const wantsServer = pi.getFlag("server") === true;
-    const clientFlag = pi.getFlag("client");
-    const wantsClient = typeof clientFlag === "string";
-
-    if (!wantsClient) {
-      if (clientFlag !== undefined) {
-        ctx.ui.notify("IPC: --client requires a name (e.g. --client charly).", "error");
-      }
-      return;
-    }
-
-    if (wantsServer) {
-      return;
-    }
-
-    const name = getConfiguredClientName(pi);
-    if (!name) {
-      ctx.ui.setStatus("ipc-client", "IPC: disconnected");
-      ctx.ui.notify("IPC: --client requires a non-empty name.", "error");
-      return;
-    }
-
-    const config = await loadAndApplySessionConfig(pi, ctx, name);
-    clientResolvedSystemPrompt = config?.mdPromptBody || null;
-
-    await clientRole.start(ctx, name);
-  });
-
-  pi.on("before_agent_start", async (event) => {
-    if (!clientResolvedSystemPrompt) return;
-    return {
-      systemPrompt: `${event.systemPrompt}\n\n${clientResolvedSystemPrompt}`,
-    };
-  });
-
-  pi.on("session_shutdown", async (_event, ctx) => {
-    clientResolvedSystemPrompt = null;
-    await clientRole.shutdown(ctx);
-  });
-}

@@ -3,7 +3,6 @@ import { Type } from "@sinclair/typebox";
 import { Orchestrator, Server } from "ipc";
 import { AsyncRequestStore } from "./asyncRequests";
 import { updateClientWidget } from "./helpers";
-import { loadAndApplySessionConfig } from "./sessionConfig";
 import type {
   ClientInfo,
   LogToolInput,
@@ -19,11 +18,11 @@ export const createServerRole = (pi: ExtensionAPI) => {
   const clients = new Map<string, ClientInfo>();
   const asyncRequests = new AsyncRequestStore();
 
-  const setupServerOrchestrator = (ctx: ExtensionContext) => {
+  const setupServerOrchestrator = (ctx: ExtensionContext, serverName: string) => {
     if (!server) return;
 
     orchestrator?.close();
-    orchestrator = new Orchestrator("master", server);
+    orchestrator = new Orchestrator(serverName, server);
 
     orchestrator.onReply((reply) => {
       const tracked = asyncRequests.markCompleted(reply);
@@ -279,7 +278,7 @@ export const createServerRole = (pi: ExtensionAPI) => {
   };
 
   return {
-    async start(ctx: ExtensionContext) {
+    async start(ctx: ExtensionContext, configuredName: string) {
       if (!initialized) {
         registerTools();
         initialized = true;
@@ -321,7 +320,7 @@ export const createServerRole = (pi: ExtensionAPI) => {
         });
       }
 
-      setupServerOrchestrator(ctx);
+      setupServerOrchestrator(ctx, configuredName);
       updateClientWidget(ctx, "server", clients);
       ctx.ui.notify("IPC server started", "success");
     },
@@ -341,44 +340,3 @@ export const createServerRole = (pi: ExtensionAPI) => {
     },
   };
 };
-
-export default function ipcServerExtension(pi: ExtensionAPI) {
-  let serverResolvedSystemPrompt: string | null = null;
-
-  pi.registerFlag("server", {
-    description: "Run IPC server (master session)",
-    type: "boolean",
-    default: false,
-  });
-
-  const serverRole = createServerRole(pi);
-
-  pi.on("session_start", async (_event, ctx) => {
-    const wantsServer = pi.getFlag("server") === true;
-    const wantsClient = typeof pi.getFlag("client") === "string";
-
-    if (!wantsServer) return;
-
-    if (wantsClient) {
-      ctx.ui.notify("IPC: both --server and --client set. Pick one.", "error");
-      return;
-    }
-
-    const config = await loadAndApplySessionConfig(pi, ctx, "master");
-    serverResolvedSystemPrompt = config?.mdPromptBody || null;
-
-    await serverRole.start(ctx);
-  });
-
-  pi.on("before_agent_start", async (event) => {
-    if (!serverResolvedSystemPrompt) return;
-    return {
-      systemPrompt: `${event.systemPrompt}\n\n${serverResolvedSystemPrompt}`,
-    };
-  });
-
-  pi.on("session_shutdown", async (_event, ctx) => {
-    serverResolvedSystemPrompt = null;
-    await serverRole.shutdown(ctx);
-  });
-}

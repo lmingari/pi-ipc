@@ -28,23 +28,13 @@ The extension uses async request flow:
 - Requests are tracked on server and can be inspected later.
 - On completion, server pushes a notification via UI and `pi.sendMessage(..., { triggerTurn: true, deliverAs: "followUp" })`.
 
-## Extension entrypoints
-
-The package uses role-stacked loading:
-
-- `packages/extensions/ipc-manager/server.ts`
-- `packages/extensions/ipc-manager/client.ts`
-
-When Pi runs without `--server` or `--client`, the extension remains passive (no IPC tools/commands are registered for the session).
-
 ### Package manifest example (`package.json`)
 
 ```json
 {
   "pi": {
     "extensions": [
-      "packages/extensions/ipc-manager/server.ts",
-      "packages/extensions/ipc-manager/client.ts"
+      "packages/extensions/ipc-manager/index.ts",
     ]
   }
 }
@@ -52,33 +42,25 @@ When Pi runs without `--server` or `--client`, the extension remains passive (no
 
 ### How to run Pi
 
-Stacked entrypoints:
+Choose between server and client roles entrypoints:
 
 ```bash
 pi \
-  -e ./packages/extensions/ipc-manager/server.ts \
-  -e ./packages/extensions/ipc-manager/client.ts \
-  --server
+  -e ./packages/extensions/ipc-manager/index.ts \
+  --server master
 
 pi \
-  -e ./packages/extensions/ipc-manager/server.ts \
-  -e ./packages/extensions/ipc-manager/client.ts \
-  --client carlos
+  -e ./packages/extensions/ipc-manager/index.ts \
+  --client worker
 ```
 
-No IPC mode (standard Pi session unchanged):
-
-```bash
-pi \
-  -e ./packages/extensions/ipc-manager/server.ts \
-  -e ./packages/extensions/ipc-manager/client.ts
-```
+Just a single server session is allowed (multiple client sessions are possible).
 
 ## Flags
 
 Registered flags:
 
-- `--server` (boolean, default `false`)
+- `--server <name>` (string)
   - Run the session as IPC server (master).
 - `--client <name>` (string)
   - Run the session as IPC client with a required non-empty client name.
@@ -86,15 +68,15 @@ Registered flags:
 Rules:
 
 - `--server` and `--client` are mutually exclusive.
-- `--client` without a valid name is rejected.
+- `--server` and `--client` without a valid name are rejected.
 
 ### Role config from `subagents/*.md`
 
 At startup, IPC roles look for markdown config files in a `subagents/` directory,
 starting from current working directory and walking up parent directories.
 
-- Client mode (`--client carlos`) -> `subagents/carlos.md`
-- Server mode (`--server`) -> `subagents/master.md`
+- Client mode (`--client worker`) -> `subagents/worker.md`
+- Server mode (`--server master`) -> `subagents/master.md`
 
 If found:
 
@@ -117,7 +99,7 @@ thinking: medium
 tools: read,edit,bash
 ---
 
-You are Carlos, focused on backend changes.
+You are Worker, focused on backend changes.
 Prefer concise updates and include file paths in outputs.
 ```
 
@@ -216,7 +198,7 @@ Send a final reply for a pending request from client back to server.
 ## Session lifecycle summary
 
 - On `session_start`:
-  - starts server when `--server`
+  - starts server when `--server <name>`
   - connects client when `--client <name>`
 - During run:
   - server tracks client connect/disconnect/status events
