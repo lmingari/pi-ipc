@@ -45,17 +45,10 @@ export const handleClientLog = (pi: ExtensionAPI, ctx: ExtensionContext, msg: { 
   });
 };
 
-export const getConfiguredServerName = (pi: ExtensionAPI) => {
-  const serverFlag = pi.getFlag("server");
-  if (typeof serverFlag !== "string") return null;
-  const name = serverFlag.trim();
-  return name || null;
-};
-
-export const getConfiguredClientName = (pi: ExtensionAPI) => {
-  const clientFlag = pi.getFlag("client");
-  if (typeof clientFlag !== "string") return null;
-  const name = clientFlag.trim();
+export const getFlagString = (pi: ExtensionAPI, flagName: string): string | null => {
+  const flag = pi.getFlag(flagName);
+  if (typeof flag !== "string") return null;
+  return flag.trim();
   return name || null;
 };
 

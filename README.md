@@ -42,16 +42,34 @@ The extension uses async request flow:
 
 ### How to run Pi
 
-Choose between server and client roles entrypoints:
+**Server or client with explicit agent config (recommended for sharing configs):**
 
 ```bash
+# Server with explicit agent config
 pi \
   -e ./packages/extensions/ipc-manager/index.ts \
-  --server master
+  --server master \
+  --agent master.md
+
+# Client with shared worker config (multiple clients can use same file)
+pi \
+  -e ./packages/extensions/ipc-manager/index.ts \
+  --client worker1 \
+  --agent worker.md
 
 pi \
   -e ./packages/extensions/ipc-manager/index.ts \
-  --client worker
+  --client worker2 \
+  --agent worker.md
+```
+
+**Using `--agent` alone (for non-IPC sessions):**
+
+```bash
+# Load a config file without starting IPC (e.g., for regular session with tools/role config)
+pi \
+  -e ./packages/extensions/ipc-manager/index.ts \
+  --agent worker.md
 ```
 
 Just a single server session is allowed (multiple client sessions are possible).
@@ -61,22 +79,35 @@ Just a single server session is allowed (multiple client sessions are possible).
 Registered flags:
 
 - `--server <name>` (string)
-  - Run the session as IPC server (master).
+  - Run the session as IPC server (master). Optionally load config from `--agent <file>.md`.
 - `--client <name>` (string)
-  - Run the session as IPC client with a required non-empty client name.
+  - Run the session as IPC client with a required non-empty client name. Optionally load config from `--agent <file>.md`.
+- `--agent <name>.md` (string)
+  - Load subagent config from `.pi/subagents/<name.md>`. This flag can be used:
+    - Combined with `--server` or `--client` to apply role-specific configuration
+    - Alone (without `--server`/`--client`) to load a config file for a non-IPC session
 
 Rules:
 
 - `--server` and `--client` are mutually exclusive.
 - `--server` and `--client` without a valid name are rejected.
+- When `--agent` is used with `--server` or `--client`, it specifies the config file instead of the old implicit `.pi/subagents/<name.md>` lookup.
+- When `--agent` is used alone (without `--server`/`--client`), only the config is loaded without starting IPC.
 
-### Role config from `subagents/*.md`
+### Role config from `.pi/subagents/*.md`
 
-At startup, IPC roles look for markdown config files in a `subagents/` directory,
-starting from current working directory and walking up parent directories.
+When using `--agent <name.md>` with `--server` or `--client`:
 
-- Client mode (`--client worker`) -> `subagents/worker.md`
-- Server mode (`--server master`) -> `subagents/master.md`
+- Loads config from `.pi/subagents/<name.md>` (relative to current directory or parent directories)
+- Multiple clients can now share the same config file by using the same `--agent <name.md>`
+
+When `--agent` is NOT specified and using `--server` or `--client`:
+
+- Use default context config file for the subagent
+
+When using `--agent` alone (without `--server`/`--client`):
+
+- Loads the config file without starting IPC (for regular sessions with tools/role configuration)
 
 If found:
 
@@ -90,7 +121,7 @@ Supported frontmatter keys:
 - `tools` (comma/space-separated string or array)
 - `no-tools: true` (disables tools)
 
-Example (`subagents/carlos.md`):
+Example (`.pi/subagents/worker.md`):
 
 ```md
 ---

@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { createServerRole } from "./server";
 import { createClientRole } from "./client";
-import { getConfiguredServerName, getConfiguredClientName } from "./helpers";
+import { getFlagString } from "./helpers";
 import { loadAndApplySessionConfig } from "./sessionConfig";
 
 export { createServerRole } from "./server";
@@ -18,18 +18,30 @@ export default function (pi: ExtensionAPI) {
     type: "string",
   });
 
-  let serverRole: ReturnType<typeof createServerRole> | null = null;
-  let clientRole: ReturnType<typeof createClientRole> | null = null;
-  let activeRole: ReturnType<typeof createServerRole> | ReturnType<typeof createClientRole> | null = null;
+  pi.registerFlag("agent", {
+    description: "Load subagent config from subagents/<name>.md: --agent <name>.md",
+    type: "string",
+  });
+
+  type IpcRole = ReturnType<typeof createServerRole> | ReturnType<typeof createClientRole>;
+  let activeRole: IpcRole | null = null;
   let resolvedSystemPrompt: string | null = null;
 
   pi.on("session_start", async (_event, ctx) => {
-    const serverName = getConfiguredServerName(pi);
-    const clientName = getConfiguredClientName(pi);
+    const serverName = getFlagString(pi, "server");
+    const clientName = getFlagString(pi, "client");
+    const agentFile  = getFlagString(pi, "agent");
+    
     const wantsServer = !!serverName;
     const wantsClient = !!clientName;
+    const wantsAgent  = !!agentFile;
 
-    if (!wantsServer && !wantsClient) return;
+    if (!wantsServer && !wantsClient && !wantsAgent) return;
+
+    if (wantsAgent) {
+      const config = await loadAndApplySessionConfig(pi, ctx, agentFile!);
+      resolvedSystemPrompt = config?.mdPromptBody || null;
+    }
 
     if (wantsServer && wantsClient) {
       ctx.ui.notify("IPC: both --server and --client set. Pick one.", "error");
@@ -37,19 +49,12 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (wantsServer) {
-      serverRole ??= createServerRole(pi);
-      const config = await loadAndApplySessionConfig(pi, ctx, serverName);
-      resolvedSystemPrompt = config?.mdPromptBody || null;
-      activeRole = serverRole;
-      await serverRole.start(ctx, serverName);
-      return;
+      activeRole = createServerRole(pi);
+      await activeRole.start(ctx, serverName!);
+    } else if (wantsClient) {
+      activeRole = createClientRole(pi);
+      await activeRole.start(ctx, clientName!);
     }
-
-    clientRole ??= createClientRole(pi);
-    const config = await loadAndApplySessionConfig(pi, ctx, clientName);
-    resolvedSystemPrompt = config?.mdPromptBody || null;
-    activeRole = clientRole;
-    await clientRole.start(ctx, clientName);
   });
 
   pi.on("before_agent_start", async (event) => {
@@ -60,8 +65,8 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
-    if (!activeRole) return;
     resolvedSystemPrompt = null;
+    if (!activeRole) return;
     await activeRole.shutdown(ctx);
     activeRole = null;
   });

@@ -81,12 +81,11 @@ function hasThinkingFlag(pi: ExtensionAPI): boolean {
   return pi.getFlag("thinking") !== undefined;
 }
 
-function findConfigFile(startDir: string, agentName: string): string | null {
+function findConfigFile(startDir: string, filePath: string): string | null {
   let currentDir = startDir;
-  const fileName = `${agentName}.md`;
 
   while (true) {
-    const candidate = path.join(currentDir, "subagents", fileName);
+    const candidate = path.join(currentDir, ".pi", "subagents", filePath);
     try {
       if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
     } catch {
@@ -99,20 +98,37 @@ function findConfigFile(startDir: string, agentName: string): string | null {
   }
 }
 
-function loadMarkdownConfig(cwd: string, agentName: string): MdConfig | null {
-  const filePath = findConfigFile(cwd, agentName);
-  if (!filePath) return null;
+function loadMarkdownConfig(cwd: string, filePath: string): MdConfig | null {
+  // First check if the filePath exists directly
+  let resolvedPath: string | null = null;
+  
+  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+    resolvedPath = filePath;
+  } else if (fs.existsSync(path.join(cwd, filePath)) && fs.statSync(path.join(cwd, filePath)).isFile()) {
+    resolvedPath = path.join(cwd, filePath);
+  } else {
+    // If not, try looking in subagents directory - add .md extension if not already present
+    const fileNameWithExt = filePath.endsWith('.md') ? filePath : `${filePath}.md`;
+    const subagentsPath = findConfigFile(cwd, fileNameWithExt);
+    if (subagentsPath) {
+      resolvedPath = subagentsPath;
+    }
+  }
+
+  if (!resolvedPath) {
+    return null;
+  }
 
   let content: string;
   try {
-    content = fs.readFileSync(filePath, "utf-8");
+    content = fs.readFileSync(resolvedPath, "utf-8");
   } catch {
     return null;
   }
 
   const { frontmatter, body } = parseFrontmatter<Record<string, unknown>>(content);
   return {
-    filePath,
+    filePath: resolvedPath,
     frontmatter: frontmatter ?? {},
     body: body ?? "",
   };
@@ -156,8 +172,8 @@ async function applyModelFromSpec(
   return { modelApplied, thinkingApplied };
 }
 
-export async function loadAndApplySessionConfig(pi: ExtensionAPI, ctx: ExtensionContext, agentName: string) {
-  const config = loadMarkdownConfig(ctx.cwd, agentName);
+export async function loadAndApplySessionConfig(pi: ExtensionAPI, ctx: ExtensionContext, explicitFilePath: string) {
+  const config = loadMarkdownConfig(ctx.cwd, explicitFilePath);
   if (!config) return null;
 
   let modelApplied = false;
