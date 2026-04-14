@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { Type } from "@sinclair/typebox";
 import { Client, Orchestrator } from "ipc";
 import {
-  getConfiguredClientName,
+  getFlagString,
   handleClientLog,
   recomputeClientPresence,
   sendClientPresence,
@@ -34,7 +34,7 @@ export const createClientRole = (pi: ExtensionAPI) => {
   };
 
   const setClientPresence = (ctx: ExtensionContext, presence: ClientPresence) => {
-    const name = getConfiguredClientName(pi);
+    const name = getFlagString(pi, "client");
     emitClientPresenceIfChanged(presence);
     setClientStatus(ctx, name, presence);
   };
@@ -53,30 +53,36 @@ export const createClientRole = (pi: ExtensionAPI) => {
       });
 
       ctx.ui.notify(`IPC request ${request.requestId} from ${request.from}`, "info");
-      pi.sendMessage(
-        {
-          customType: "ipc-request",
-          content: [
-            `Sub-agent task from '${request.from}'.`,
-            `requestId: ${request.requestId}`,
-            `Task: ${request.payload.task}`,
-            "Provide the full final answer in this client session.",
-            "Then call tool 'ipc_send_reply' with the same requestId, answer, and summary.",
-            "Keep your own context isolated and only return final scoped result.",
-          ].join("\n"),
-          display: true,
-          details: {
-            requestId: request.requestId,
-            from: request.from,
-            task: request.payload.task,
-            expectedFormat: request.payload.expectedFormat,
-          },
-        },
-        {
-          triggerTurn: true,
-          deliverAs: "followUp",
-        },
+      pi.sendUserMessage([
+          { type: "text", text: `Sub-agent task from '${request.from}` },
+          { type: "text", text: `Task: ${request.payload.task}` },
+          { type: "text", text: `Request ID: ${request.requestId}` },
+      ],  { deliverAs: "followUp" }
       );
+//      pi.sendMessage(
+//        {
+//          customType: "ipc-request",
+//          content: [
+//            `Sub-agent task from '${request.from}'.`,
+//            `requestId: ${request.requestId}`,
+//            `Task: ${request.payload.task}`,
+//            "Provide the full final answer in this client session.",
+//            "Then call tool 'ipc_send_reply' with the same requestId, answer, and summary.",
+//            "Keep your own context isolated and only return final scoped result.",
+//          ].join("\n"),
+//          display: true,
+//          details: {
+//            requestId: request.requestId,
+//            from: request.from,
+//            task: request.payload.task,
+//            expectedFormat: request.payload.expectedFormat,
+//          },
+//        },
+//        {
+//          triggerTurn: true,
+//          deliverAs: "followUp",
+//        },
+//      );
     });
 
     orchestrator.onProgress((progress) => {
@@ -134,7 +140,7 @@ export const createClientRole = (pi: ExtensionAPI) => {
     pi.registerCommand("ipc-connect", {
       description: "Connect IPC client using --client flag name",
       handler: async (_args, ctx) => {
-        const name = getConfiguredClientName(pi);
+        const name = getFlagString(pi, "client");
         if (!name) {
           ctx.ui.setStatus("ipc-client", "IPC: disconnected");
           ctx.ui.notify("IPC: set --client <name> to use /ipc-connect.", "error");

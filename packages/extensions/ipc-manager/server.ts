@@ -53,7 +53,7 @@ export const createServerRole = (pi: ExtensionAPI) => {
         },
         {
           triggerTurn: true,
-          deliverAs: "followUp",
+          deliverAs: "steer",
         },
       );
     });
@@ -126,12 +126,12 @@ export const createServerRole = (pi: ExtensionAPI) => {
     pi.registerTool({
       name: "ipc_request",
       label: "IPC Request",
-      description: "Send a task request to a client and return immediately with requestId",
+      description: "Send a task request to a sub-agent client and return immediately with requestId",
       promptSnippet: "Delegate a task to a connected IPC client without waiting for the final result",
       promptGuidelines: [
-        "Use only in server mode.",
+        "Use only in server mode to send an asynchronous message.",
+        "Store the returned requestId and wait for task completion.",
         "Delegate one clear, scoped task to one connected client.",
-        "Store the returned requestId and use ipc_request_status to track completion.",
       ],
       parameters: Type.Object({
         client: Type.String({ description: "Target client name" }),

@@ -6,6 +6,23 @@ It adds IPC-based coordination between Pi sessions using Unix sockets.
 
 > Dependency note: this extension depends on the `ipc` package in this repo (`packages/ipc`), but this README focuses only on the extension behavior.
 
+## Building
+
+To build the IPC package (required for the extension to work):
+
+1. Ensure you have Node.js 18+ and npm installed.
+2. Clone this repository.
+3. Run `npm install` in the root directory.
+4. Run `npm run build` (or `cd packages/ipc && npm run build`).
+
+> If you modify the IPC package source code, re-run the build step.
+
+This repository uses npm workspaces; running `npm install` in the root directory installs dependencies for both the `ipc` package and the extension.
+
+The extension itself is written in TypeScript and does not need separate compilation; Pi loads it via tsx. The build step compiles the `ipc` dependency, which provides the underlying IPC transport.
+
+You can run the IPC package tests with `npm test` in the `packages/ipc` directory.
+
 ## What this extension does
 
 `ipc-manager` supports two runtime modes:
