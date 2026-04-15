@@ -2,45 +2,33 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { Type } from "@sinclair/typebox";
 import { Client, Orchestrator } from "ipc";
 import {
-  getFlagString,
   handleClientLog,
-  recomputeClientPresence,
   sendClientPresence,
-  setClientStatus,
 } from "./helpers";
 import type { ClientPresence, ReplyToolInput } from "./types";
 
-const PRESENCE_EVENTS = [
-  "before_agent_start",
-  "agent_start",
-  "tool_execution_start",
-  "tool_execution_end",
-  "turn_end",
-  "agent_end",
-] as const;
-
 export const createClientRole = (pi: ExtensionAPI) => {
+  let clientName: string | null = null;
   let client: Client | null = null;
   let orchestrator: Orchestrator | null = null;
   let clientPresence: ClientPresence | null = null;
-  let active = false;
   let initialized = false;
   const inboundRequests = new Map<string, { from: string; task: string; receivedAt: number }>();
 
-  const emitClientPresenceIfChanged = (presence: ClientPresence) => {
+  const setClientPresence = async (ctx: ExtensionContext, presence: ClientPresence | null) => {
     if (clientPresence === presence) return;
     clientPresence = presence;
-    pi.events.emit("ipc:presence-changed", { status: presence, timestamp: Date.now() });
+    if (!client) {
+      ctx.ui.setStatus("ipc-client", "IPC: disconnected");
+      return;
+    }
+    const suffix = presence ? ` (${presence})` : "";
+    ctx.ui.setStatus("ipc-client", `IPC: connected as ${clientName}${suffix}`);
+    await sendClientPresence(client, presence);
   };
 
-  const setClientPresence = (ctx: ExtensionContext, presence: ClientPresence) => {
-    const name = getFlagString(pi, "client");
-    emitClientPresenceIfChanged(presence);
-    setClientStatus(ctx, name, presence);
-  };
-
-  const setupClientOrchestrator = (ctx: ExtensionContext, clientName: string) => {
-    if (!client) return;
+  const setupClientOrchestrator = (ctx: ExtensionContext) => {
+    if (!client || !clientName) return;
 
     orchestrator?.close();
     orchestrator = new Orchestrator(clientName, client);
@@ -54,35 +42,11 @@ export const createClientRole = (pi: ExtensionAPI) => {
 
       ctx.ui.notify(`IPC request ${request.requestId} from ${request.from}`, "info");
       pi.sendUserMessage([
-          { type: "text", text: `Sub-agent task from '${request.from}` },
+          { type: "text", text: `Request from sub-agent '${request.from}'` },
+          { type: "text", text: `requestId: ${request.requestId}` },
           { type: "text", text: `Task: ${request.payload.task}` },
-          { type: "text", text: `Request ID: ${request.requestId}` },
       ],  { deliverAs: "followUp" }
       );
-//      pi.sendMessage(
-//        {
-//          customType: "ipc-request",
-//          content: [
-//            `Sub-agent task from '${request.from}'.`,
-//            `requestId: ${request.requestId}`,
-//            `Task: ${request.payload.task}`,
-//            "Provide the full final answer in this client session.",
-//            "Then call tool 'ipc_send_reply' with the same requestId, answer, and summary.",
-//            "Keep your own context isolated and only return final scoped result.",
-//          ].join("\n"),
-//          display: true,
-//          details: {
-//            requestId: request.requestId,
-//            from: request.from,
-//            task: request.payload.task,
-//            expectedFormat: request.payload.expectedFormat,
-//          },
-//        },
-//        {
-//          triggerTurn: true,
-//          deliverAs: "followUp",
-//        },
-//      );
     });
 
     orchestrator.onProgress((progress) => {
@@ -93,10 +57,8 @@ export const createClientRole = (pi: ExtensionAPI) => {
     });
   };
 
-  const connect = async (ctx: ExtensionContext, rawName: string) => {
-    const name = rawName.trim();
-    if (!name) {
-      ctx.ui.setStatus("ipc-client", "IPC: disconnected");
+  const connect = async (ctx: ExtensionContext) => {
+    if (!clientName) {
       ctx.ui.notify("IPC: client name is required.", "error");
       return false;
     }
@@ -106,32 +68,30 @@ export const createClientRole = (pi: ExtensionAPI) => {
       client = null;
     }
 
-    const nextClient = new Client(name);
+    const nextClient = new Client(clientName);
 
     try {
       await nextClient.connect();
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      ctx.ui.setStatus("ipc-client", "IPC: disconnected");
-      ctx.ui.notify(`IPC client failed to connect as ${name}: ${reason}`, "error");
+      ctx.ui.notify(`IPC client failed to connect as ${clientName}: ${reason}`, "error");
       return false;
     }
 
     client = nextClient;
     client.on("log", (msg) => handleClientLog(pi, ctx, msg as { message?: string }));
-    client.onDisconnect(() => {
+    client.onDisconnect(async () => {
       client = null;
-      clientPresence = null;
       inboundRequests.clear();
       orchestrator?.close();
       orchestrator = null;
       ctx.ui.notify("IPC server disconnected", "warning");
-      ctx.ui.setStatus("ipc-client", "IPC: disconnected");
+      await setClientPresence(ctx, null);
     });
 
-    setupClientOrchestrator(ctx, name);
-    ctx.ui.notify(`IPC client connected as ${name}`, "success");
-    recomputeClientPresence(ctx, active ? "client" : null, (presence) => setClientPresence(ctx, presence));
+    setupClientOrchestrator(ctx);
+    ctx.ui.notify(`IPC client connected as ${clientName}`, "success");
+    await setClientPresence(ctx, ctx.isIdle() ? "idle" : "busy");
 
     return true;
   };
@@ -140,22 +100,18 @@ export const createClientRole = (pi: ExtensionAPI) => {
     pi.registerCommand("ipc-connect", {
       description: "Connect IPC client using --client flag name",
       handler: async (_args, ctx) => {
-        const name = getFlagString(pi, "client");
-        if (!name) {
-          ctx.ui.setStatus("ipc-client", "IPC: disconnected");
+        if (!clientName) {
           ctx.ui.notify("IPC: set --client <name> to use /ipc-connect.", "error");
           return;
         }
-
-        active = true;
-        await connect(ctx, name);
+        await connect(ctx);
       },
     });
 
     pi.registerCommand("ipc-reply", {
       description: "Reply manually to a pending IPC request: /ipc-reply <requestId> <answer>",
       handler: async (args, ctx) => {
-        if (!active || !orchestrator) {
+        if (!client || !orchestrator) {
           ctx.ui.notify("IPC: client orchestrator not ready.", "error");
           return;
         }
@@ -224,7 +180,7 @@ export const createClientRole = (pi: ExtensionAPI) => {
         to: Type.Optional(Type.String({ description: "Override target node id" })),
       }),
       async execute(_toolCallId, params: ReplyToolInput) {
-        if (!active || !orchestrator) {
+        if (!client || !orchestrator) {
           throw new Error("IPC reply is only available when client orchestrator is running.");
         }
 
@@ -260,56 +216,41 @@ export const createClientRole = (pi: ExtensionAPI) => {
   };
 
   const registerPresenceHandlers = () => {
-    pi.events.on("ipc:presence-changed", async (event) => {
-      if (!active) return;
-      const presence = event?.status;
-      if (presence !== "idle" && presence !== "busy") return;
 
-      await sendClientPresence(client, presence);
-    });
-
-    for (const eventName of PRESENCE_EVENTS) {
-      pi.on(eventName, async (_event, ctx) => {
-        if (!active) return;
-
-        if (eventName === "agent_end") {
-          setClientPresence(ctx, "idle");
-          return;
-        }
-
-        recomputeClientPresence(ctx, "client", (presence) => setClientPresence(ctx, presence));
+    pi.on("agent_start", async (_event, ctx) => {
+        if (!client) return;
+        await setClientPresence(ctx, "busy");
       });
-    }
+
+    pi.on("agent_end", async (_event, ctx) => {
+        if (!client) return;
+        await setClientPresence(ctx, "idle");
+    });
   };
 
   return {
     async start(ctx: ExtensionContext, configuredName: string) {
+      clientName = configuredName;
+
       if (!initialized) {
         registerCommandsAndTools();
         registerPresenceHandlers();
         initialized = true;
       }
 
-      active = true;
-      return connect(ctx, configuredName);
+      return connect(ctx);
     },
 
     async shutdown(ctx: ExtensionContext) {
-      active = false;
       orchestrator?.close();
       orchestrator = null;
       inboundRequests.clear();
 
-      if (!client) {
-        clientPresence = null;
-        ctx.ui.setStatus("ipc-client", undefined);
-        return;
+      if (client) {
+          await client.close();
+          client = null;
       }
-
-      await client.close();
-      client = null;
-      clientPresence = null;
-      ctx.ui.setStatus("ipc-client", undefined);
+      await setClientPresence(ctx, null);
     },
   };
 };

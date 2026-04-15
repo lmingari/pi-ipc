@@ -27,34 +27,16 @@ export const createServerRole = (pi: ExtensionAPI) => {
     orchestrator.onReply((reply) => {
       const tracked = asyncRequests.markCompleted(reply);
       const suffix = tracked ? " (async request completed)" : "";
-      ctx.ui.notify(`IPC reply ${reply.requestId} from ${reply.from}${suffix}`, "success");
-
       if (!tracked) return;
 
-      const summary = reply.payload.summary ? `\nSummary: ${reply.payload.summary}` : "";
-      pi.sendMessage(
-        {
-          customType: "ipc-reply",
-          content: [ 
-              `Async IPC reply from '${reply.from}'.`,
-              `requestId: ${reply.requestId}`,
-              `ok: ${reply.payload.ok}`,
-              `Answer: ${reply.payload.answer}${summary}`,
-          ].join("\n"),
-          display: true,
-          details: {
-            requestId: reply.requestId,
-            from: reply.from,
-            ok: reply.payload.ok,
-            summary: reply.payload.summary,
-            answer: reply.payload.answer,
-            artifactRefs: reply.payload.artifactRefs ?? [],
-          },
-        },
-        {
-          triggerTurn: true,
-          deliverAs: "steer",
-        },
+      ctx.ui.notify(`IPC reply ${reply.requestId} from ${reply.from}${suffix}`, "success");
+      pi.sendUserMessage([
+          { type: "text", text: `Sub-agent reply from '${reply.from}'`},
+          { type: "text", text: `Answer: ${reply.payload.answer}`},
+          { type: "text", text: `Summary: ${reply.payload.summary}`},
+          { type: "text", text: `ok: ${reply.payload.ok}`},
+          { type: "text", text: `requestId: ${reply.requestId}`},
+      ],  { deliverAs: "steer" }
       );
     });
 

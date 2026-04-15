@@ -52,8 +52,8 @@ export const getFlagString = (pi: ExtensionAPI, flagName: string): string | null
   return name || null;
 };
 
-export const sendClientPresence = async (client: Client | null, presence: ClientPresence) => {
-  if (!client || !client.isConnected()) return;
+export const sendClientPresence = async (client: Client | null, presence: ClientPresence | null) => {
+  if (!client || !client.isConnected() || presence === null) return;
 
   try {
     await client.send({
@@ -64,24 +64,4 @@ export const sendClientPresence = async (client: Client | null, presence: Client
   } catch {
     // best-effort presence update; disconnect handler will reflect connection state
   }
-};
-
-export const setClientStatus = (ctx: ExtensionContext, name: string | null, presence: ClientPresence | null) => {
-  if (!name) {
-    ctx.ui.setStatus("ipc-client", "IPC: disconnected");
-    return;
-  }
-
-  const suffix = presence ? ` (${presence})` : "";
-  ctx.ui.setStatus("ipc-client", `IPC: connected as ${name}${suffix}`);
-};
-
-export const recomputeClientPresence = (
-  ctx: ExtensionContext,
-  mode: "server" | "client" | null,
-  setPresence: (presence: ClientPresence) => void,
-) => {
-  if (mode !== "client") return;
-  const nextPresence: ClientPresence = ctx.isIdle() ? "idle" : "busy";
-  setPresence(nextPresence);
 };
